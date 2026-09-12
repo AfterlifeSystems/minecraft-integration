@@ -1,0 +1,9 @@
+server-port=25565
+online-mode=false
+motd=Neural Nexus LAN
+difficulty=peaceful
+spawn-protection=0
+max-players=8
+view-distance=8
+simulation-distance=8
+enforce-secure-profile=false

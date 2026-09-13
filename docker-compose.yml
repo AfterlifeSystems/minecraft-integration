@@ -37,6 +37,31 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
+  playit:
+    image: ghcr.io/playit-cloud/playit-agent:1.0
+    network_mode: host
+    environment:
+    - SECRET_KEY=8e27e9c574f564f03a987356c099ce80ea081f0716c05eb35f5feadb30361b8c
+
+  # Inert: `docker compose up` does not start this service.
+  # TCP join only. No UDP. Do not set VOICE_HOST to the ngrok hostname.
+  # 1. Put NGROK_AUTHTOKEN in .env (dashboard → Your Authtoken).
+  # 2. docker compose --profile ngrok up ngrok
+  # 3. docker compose logs -f ngrok
+  #    Players type the printed host:port (drop tcp://).
+  # Host agent instead of Compose: ngrok tcp 25565
+  ngrok:
+    profiles: ["ngrok"]
+    image: ngrok/ngrok:latest
+    network_mode: host
+    depends_on:
+      fabric-server:
+        condition: service_healthy
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    command: ["tcp", "25565"]
+    restart: unless-stopped
+
 volumes:
   fabric-world:
   fabric-config:

@@ -31,7 +31,7 @@ On Windows: `.\start.ps1` after the same `eula.txt` and jars are in `mods/`. The
 
 `start.sh` copies `server.properties.example` (offline mode) on first run.
 
-Leave the Anubis Cloudflare Tunnel as HTTP-only (`api.neuralnexus.site`). To let anyone in the world join, publish Fabric with a game TCP/UDP tunnel and set Simple Voice Chat `voice_host`. See `docs/PUBLIC-ACCESS.md`.
+Leave the Anubis Cloudflare Tunnel as HTTP-only (`api.neuralnexus.site`). To let anyone in the world join, use a home port forward, playit, or (TCP join only) ngrok, then set Simple Voice Chat `voice_host`. See `docs/PUBLIC-ACCESS.md`. Compose does not start ngrok and does not change the router.
 
 Use **Simple Voice Chat 2.5.28** from `mods/` — not 2.6.x. The companion voice plugin can only join protocol 18.
 

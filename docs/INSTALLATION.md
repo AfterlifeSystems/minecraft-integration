@@ -134,7 +134,7 @@ Launch **fabric-loader-1.21.1**. Join the address the host sent. Details: [KID.m
 
 ## 5. Public server (AWS EC2 or any VPS)
 
-Use this when players should join from anywhere without playit.gg.
+Use this when players should join from anywhere without playit.gg. For a PC behind a home router, use the port-forward or ngrok runbooks in [PUBLIC-ACCESS.md](PUBLIC-ACCESS.md) instead. Compose does not start ngrok and does not change the router.
 
 1. Clone this repo onto the instance (same steps as above).
 2. Open the instance firewall **and** the cloud security group:
@@ -157,7 +157,7 @@ For a host that should stay behind NAT (no inbound ports), use a game tunnel ins
 |---|---|
 | Companion joined but talks as the wrong avatar | Recreate, do not restart: `docker compose up -d --force-recreate --no-deps companion`. Confirm the `Neural Nexus avatar` fingerprint. |
 | `InventoryWindow` crash / cannot join 1.21.1 | You ran `npm audit fix --force`. Reinstall from the lockfile: `npm ci`. |
-| Player hears nothing | Confirm Simple Voice Chat **2.5.28** on server and client. Confirm UDP `24454` is open. Set `VOICE_HOST` to the address the player can reach. **V** is the settings menu; bind push-to-talk. |
+| Player hears nothing | Confirm Simple Voice Chat **2.5.28** on server and client. Confirm UDP `24454` is open (home forward, VPS, or playit). ngrok cannot carry voice. Set `VOICE_HOST` to the address the player can reach. **V** is the settings menu; bind push-to-talk. |
 | Chat ignored | Mention the offline name (`@NeuralNexus`) or whisper. Plain chat is dropped on purpose. |
 | `docker compose restart` after editing `.env` | That does not reload env. Recreate the companion. |
 | Body is mute | Neural Nexus must already be serving. This repo does not start Anubis. |
@@ -165,5 +165,5 @@ For a host that should stay behind NAT (no inbound ports), use a game tunnel ins
 ## Related
 
 - [HOST.md](HOST.md): Ubuntu / Windows Fabric notes
-- [PUBLIC-ACCESS.md](PUBLIC-ACCESS.md): playit.gg and why the Cloudflare HTTP tunnel cannot carry Minecraft
+- [PUBLIC-ACCESS.md](PUBLIC-ACCESS.md): home port forward, ngrok, playit.gg, and why the Cloudflare HTTP tunnel cannot carry Minecraft
 - [COMMANDS.md](COMMANDS.md): every player phrase and latent skill

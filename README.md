@@ -1,6 +1,6 @@
 # Neural Nexus Minecraft companion
 
-A Mineflayer body for a personal avatar on the **already-running** Neural Nexus API ([anubis](https://github.com/efwoods/anubis)). The browser is not used. Player phrases, latent `!` skills, voice, and host commands: [docs/COMMANDS.md](docs/COMMANDS.md).
+A Mineflayer body for a personal avatar on the **already-running** ([Neural Nexus API](https://api.neuralnexus.site)). The browser is not used. Player phrases, latent `!` skills, voice, and host commands: [docs/COMMANDS.md](docs/COMMANDS.md).
 
 ```
 kid talks in a Fabric 1.21.1 world

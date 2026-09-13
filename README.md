@@ -206,7 +206,7 @@ These values configure the companion and the Fabric server. They are not what a 
 
 The Neural Nexus API already reaches the public internet over HTTPS. Minecraft cannot use that tunnel. Java edition is TCP `25565`. Simple Voice Chat is UDP `24454`.
 
-Keep the companion on the local Fabric process. Prefer a LAN IP, a home router port forward, or a public VPS (EC2). playit.gg Premium is $3/month; their free game list includes Minecraft Java and Simple Voice Chat, but do not treat the tunnel as a $0 default. ngrok can publish TCP join only; it cannot carry voice UDP. Then set `VOICE_HOST` to the UDP address players should use.
+Keep the companion on the local Fabric process. Prefer a LAN IP, a home router port forward, or a public VPS (EC2). playit.gg Premium is $3/month; their free game list includes Minecraft Java and Simple Voice Chat, but do not treat the tunnel as a $0 default. ngrok can publish TCP join only (`docker compose --profile ngrok up ngrok`); it cannot carry voice UDP. Then set `VOICE_HOST` to the UDP address players should use.
 
 This server is `online-mode=false`. Anyone who has the address can join under any name. Share it with people you intend to play with.
 

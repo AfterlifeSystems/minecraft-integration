@@ -2,7 +2,9 @@
 
 The Neural Nexus API already reaches the public internet through the existing Cloudflare Tunnel (`api.neuralnexus.site` → `http://localhost:8124` in `~/.cloudflared/config.yml`). Minecraft cannot use that same pattern.
 
-This file is operator documentation. Compose does **not** start ngrok, and it does **not** change the home router. You run those steps yourself when you need them.
+This file is operator documentation. Compose does **not** start ngrok on a normal `up`, and it does **not** change the home router.
+
+To start the inert ngrok TCP tunnel: put `NGROK_AUTHTOKEN` in `.env`, then `docker compose --profile ngrok up ngrok`. Or on the host: `ngrok tcp 25565`. Full steps are under **ngrok** below.
 
 ## What the companion `.env` stays
 
@@ -130,13 +132,53 @@ Verify the playit account email. An unverified account shows the agent as not co
 
 ## ngrok (TCP join only)
 
-ngrok is a hosted TCP (and HTTP) tunnel. It is **not** in `docker-compose.yml`. Do not add it unless you are choosing this path on purpose.
-
 Official Minecraft notes: [Using ngrok with Minecraft](https://ngrok.com/docs/using-ngrok-with/minecraft).
+
+The `ngrok` service in `docker-compose.yml` is **inert**. Plain `docker compose up` does not start it. It is behind Compose profile `ngrok`.
+
+### Start the tunnel
+
+**A. Opt-in Compose service** (code is in `docker-compose.yml`, off until you pass the profile):
+
+```bash
+# .env
+NGROK_AUTHTOKEN=
+
+# token: https://dashboard.ngrok.com/get-started/your-authtoken
+# Free TCP also needs a card on file: https://dashboard.ngrok.com/settings
+
+docker compose up          # Fabric + companion only; ngrok stays down
+docker compose --profile ngrok up ngrok
+docker compose logs -f ngrok
+```
+
+Copy the line that looks like `tcp://8.tcp.ngrok.io:13824`. Players type **`8.tcp.ngrok.io:13824`**. Drop `tcp://`. The public port is almost never `25565`.
+
+Stop the tunnel without touching Fabric:
+
+```bash
+docker compose --profile ngrok stop ngrok
+```
+
+**B. Host agent** (no Compose service):
+
+```bash
+# https://ngrok.com/download
+ngrok config add-authtoken "$NGROK_AUTHTOKEN"
+ngrok tcp 25565
+```
+
+Same share rule: drop `tcp://`.
+
+**C. One-shot Docker, not in Compose:**
+
+```bash
+docker run --rm --network host -e NGROK_AUTHTOKEN -it ngrok/ngrok:latest tcp 25565
+```
 
 ### What it does here
 
-- **Can** publish Java edition join: `ngrok tcp 25565`.
+- **Can** publish Java edition join to host port `25565`.
 - **Cannot** publish Simple Voice Chat. ngrok has no UDP tunnel. Leave `VOICE_HOST` unset for muted play, or set `VOICE_HOST` to a **different** reachable UDP path (home forward, IPv6, playit UDP, or a VPN). Never set `VOICE_HOST` to the ngrok TCP hostname.
 
 ### Free-plan limits (as of ngrok’s current docs)
@@ -146,19 +188,7 @@ Official Minecraft notes: [Using ngrok with Minecraft](https://ngrok.com/docs/us
 - About **1 GB / month** data transfer out and **5,000 TCP connections / month**. Minecraft can burn the bandwidth cap in a few sessions. After that, players disconnect immediately.
 - A reserved TCP address is a paid add-on, not free.
 
-### Run it yourself (not started by this repo)
-
-1. Create an ngrok account and install the agent from [ngrok.com/download](https://ngrok.com/download).
-2. Add a payment method if you are on the free plan and need TCP.
-3. `ngrok config add-authtoken <token>`
-4. With Fabric already listening on `25565`:
-
-   ```bash
-   ngrok tcp 25565
-   ```
-
-5. The agent prints `tcp://8.tcp.ngrok.io:13824` (example). Players type **`8.tcp.ngrok.io:13824`**. Drop `tcp://`. The public port is almost never `25565`.
-6. If you also opened home UDP `24454`, set `VOICE_HOST` to the **WAN IPv4** (or playit UDP host:port), then recreate Fabric. If you did not, voice will not work.
+If you also opened home UDP `24454`, set `VOICE_HOST` to the **WAN IPv4** (or playit UDP host:port), then recreate Fabric. If you did not, voice will not work.
 
 Do not point Cloudflare at Minecraft. The existing HTTP tunnel cannot carry TCP `25565` or UDP `24454`. Paid Cloudflare Spectrum can carry TCP join only; voice is still a separate UDP problem.
 

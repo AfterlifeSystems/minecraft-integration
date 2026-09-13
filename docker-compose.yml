@@ -50,17 +50,17 @@ services:
   # 3. docker compose logs -f ngrok
   #    Players type the printed host:port (drop tcp://).
   # Host agent instead of Compose: ngrok tcp 25565
-  ngrok:
-    profiles: ["ngrok"]
-    image: ngrok/ngrok:latest
-    network_mode: host
-    depends_on:
-      fabric-server:
-        condition: service_healthy
-    environment:
-      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
-    command: ["tcp", "25565"]
-    restart: unless-stopped
+  # ngrok:
+  #   profiles: ["ngrok"]
+  #   image: ngrok/ngrok:latest
+  #   network_mode: host
+  #   depends_on:
+  #     fabric-server:
+  #       condition: service_healthy
+  #   environment:
+  #     NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+  #   command: ["tcp", "25565"]
+  #   restart: unless-stopped
 
 volumes:
   fabric-world:

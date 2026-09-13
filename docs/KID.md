@@ -1,11 +1,36 @@
 # Play with the avatar
 
-You already have Minecraft Java and Fabric.
+Install Minecraft Java, then Fabric Loader **1.21.1** from the [Fabric installer](https://fabricmc.net/use/installer/). Copy the host jars. Join.
 
-1. Copy the host `mods` jars into `.minecraft/mods` (Fabric API + Simple Voice Chat 2.5.28).
-2. Launch the **fabric-loader-1.21.1** profile.
-3. Multiplayer → the address the host sent (`127.0.0.1:25565` on the same machine).
-4. `/tp NeuralNexus` if you need to find the body.
+Launch Minecraft Java once first so the game folder exists, then close it.
+
+### Linux (Ubuntu)
+
+```bash
+sudo apt update && sudo apt install -y openjdk-21-jre
+# Download fabric-installer-1.1.2.jar from https://fabricmc.net/use/installer/
+java -jar fabric-installer-1.1.2.jar client -mcversion 1.21.1 -dir "$HOME/.minecraft"
+mkdir -p "$HOME/.minecraft/mods"
+cp /path/to/host/mods/*.jar "$HOME/.minecraft/mods/"
+```
+
+### Windows (PowerShell)
+
+```powershell
+winget install --id Microsoft.OpenJDK.21 -e
+# Download fabric-installer-1.1.2.jar from https://fabricmc.net/use/installer/
+java -jar fabric-installer-1.1.2.jar client -mcversion 1.21.1 -dir "$env:APPDATA\.minecraft"
+New-Item -ItemType Directory -Force -Path "$env:APPDATA\.minecraft\mods" | Out-Null
+Copy-Item -Path "C:\path\to\host\mods\*.jar" -Destination "$env:APPDATA\.minecraft\mods\" -Force
+```
+
+`%APPDATA%\.minecraft` is `C:\Users\<you>\AppData\Roaming\.minecraft`. That is the official Minecraft Launcher folder. If you installed Java Edition from the Microsoft Store, add `-launcher microsoft_store` to the Fabric command.
+
+The two jars must be **Fabric API** for 1.21.1 and **Simple Voice Chat 2.5.28**. Do not use 2.6.x.
+
+1. Launch the **fabric-loader-1.21.1** profile in the Minecraft Launcher (you should see **Modded** on the main menu).
+2. Multiplayer → the address the host sent (`127.0.0.1:25565` on the same machine).
+3. `/teleport @s NeuralNexus` if you need to find the body.
 
 ## Talk (this is the Neural Nexus message box)
 
@@ -19,7 +44,7 @@ Press **T** and mention the avatar. That line is sent to Anubis like the web cha
 what can you do?
 ```
 
-Plain chat without `@NeuralNexus` is ignored, except follow/stop phrases and **what can you do?** `/tp` and other slash commands are server commands, not avatar chat.
+Plain chat without `@NeuralNexus` is ignored, except follow/stop phrases and **what can you do?** `/teleport` and other slash commands are server commands, not avatar chat.
 
 ## Voice
 

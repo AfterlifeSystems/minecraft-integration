@@ -12,9 +12,12 @@
   },
   "dependencies": {
     "jpeg-js": "^0.4.4",
-    "mineflayer": "^4.33.0",
+    "mineflayer": "4.39.0",
     "mineflayer-pathfinder": "^2.4.5",
     "mineflayer-simplevoice": "^1.1.1",
     "vec3": "^0.1.10"
+  },
+  "overrides": {
+    "mineflayer": "4.39.0"
   }
 }

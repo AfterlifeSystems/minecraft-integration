@@ -15,4 +15,12 @@ test("Fabric start scripts exist and copy jars from mods/", () => {
   assert.match(powerShellText, /ValidateOnly/);
   assert.match(powerShellText, /\.jar/);
   assert.equal(existsSync(resolve("server/find-java.sh")), true);
+  assert.equal(existsSync(resolve("server/docker-entrypoint.sh")), true);
+  assert.equal(existsSync(resolve("docker-compose.yml")), true);
+  assert.equal(existsSync(resolve("Dockerfile.fabric")), true);
+  assert.equal(existsSync(resolve("Dockerfile.companion")), true);
+  const composeText = readFileSync(resolve("docker-compose.yml"), "utf8");
+  assert.match(composeText, /fabric-server/);
+  assert.match(composeText, /25565/);
+  assert.match(composeText, /24454/);
 });

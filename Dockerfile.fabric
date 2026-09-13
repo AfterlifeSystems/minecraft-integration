@@ -1,0 +1,18 @@
+FROM eclipse-temurin:21-jre-jammy
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /minecraft
+
+COPY server/download-server.sh server/find-java.sh server/server.properties.example server/voicechat-server.properties.example server/ops.json.example server/docker-entrypoint.sh ./
+COPY mods/download-jars.sh /opt/mod-jars/download-jars.sh
+
+RUN chmod +x download-server.sh find-java.sh docker-entrypoint.sh /opt/mod-jars/download-jars.sh \
+  && ./download-server.sh \
+  && /opt/mod-jars/download-jars.sh
+
+EXPOSE 25565/tcp 24454/udp 24454/tcp
+
+ENTRYPOINT ["./docker-entrypoint.sh"]

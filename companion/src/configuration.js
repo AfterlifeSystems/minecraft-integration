@@ -96,6 +96,14 @@ export function loadCompanionConfiguration(repositoryRoot = process.cwd()) {
   };
 }
 
+export function assistantIdFingerprint(assistantId) {
+  const value = String(assistantId || "").trim();
+  if (value.length < 12) {
+    return value;
+  }
+  return `${value.slice(0, 8)}…${value.slice(-6)}`;
+}
+
 export function validateCompanionConfiguration(configuration) {
   if (!configuration.neuralNexusApiBaseUrl) {
     throw new Error("NEURAL_NEXUS_API_BASE_URL is required.");

@@ -6,8 +6,10 @@
 import {
   buildAmbientLookFormData,
   buildIdlePlayFormData,
+  buildLookNowResumeFormData,
   buildSpokenTurnFormData,
   buildStopFormData,
+  buildTypedChatFormData,
 } from "./messageFormData.js";
 import {
   collectMessageTurnFromFrames,
@@ -34,14 +36,24 @@ async function raiseUnlessOk(response, path) {
   throw error;
 }
 
+function notifyMessageFrames(onFrame, frames) {
+  if (typeof onFrame !== "function") {
+    return;
+  }
+  for (const frame of frames) {
+    onFrame(frame);
+  }
+}
+
 export async function streamMessageTurn({
   neuralNexusApiBaseUrl,
   apiKey,
   assistantId,
   formData,
   signal,
+  onFrame,
+  path = `/message/${encodeURIComponent(assistantId)}`,
 }) {
-  const path = `/message/${encodeURIComponent(assistantId)}`;
   const response = await fetch(`${neuralNexusApiBaseUrl}${path}`, {
     method: "POST",
     headers: authenticationHeaders(apiKey),
@@ -66,11 +78,13 @@ export async function streamMessageTurn({
       pendingText += textDecoder.decode(value, { stream: true });
       const consumed = consumeServerSentEventBuffer(pendingText);
       frames.push(...consumed.frames);
+      notifyMessageFrames(onFrame, consumed.frames);
       pendingText = consumed.remaining;
     }
     if (pendingText.trim()) {
       const consumed = consumeServerSentEventBuffer(`${pendingText}\n\n`);
       frames.push(...consumed.frames);
+      notifyMessageFrames(onFrame, consumed.frames);
     }
   } finally {
     reader.releaseLock();
@@ -78,10 +92,38 @@ export async function streamMessageTurn({
   return collectMessageTurnFromFrames(frames);
 }
 
+export function isLookNowInterrupt(turn) {
+  return turn?.interrupt?.kind === "look_now";
+}
+
+export async function postLookNowResume(configuration, {
+  threadId,
+  screenshotBytes,
+  requestedSources,
+  signal,
+  onFrame,
+} = {}) {
+  return streamMessageTurn({
+    neuralNexusApiBaseUrl: configuration.neuralNexusApiBaseUrl,
+    apiKey: configuration.apiKey,
+    assistantId: configuration.assistantId,
+    formData: buildLookNowResumeFormData({
+      threadId,
+      screenshotBytes,
+      requestedSources,
+      userTimezone: configuration.userTimezone,
+    }),
+    signal,
+    onFrame,
+    path: `/message/${encodeURIComponent(configuration.assistantId)}/resume`,
+  });
+}
+
 export async function postSpokenTurn(configuration, {
   playPromptMessage,
   utteranceBytes,
   signal,
+  onFrame,
 } = {}) {
   return streamMessageTurn({
     neuralNexusApiBaseUrl: configuration.neuralNexusApiBaseUrl,
@@ -94,6 +136,7 @@ export async function postSpokenTurn(configuration, {
       userTimezone: configuration.userTimezone,
     }),
     signal,
+    onFrame,
   });
 }
 
@@ -101,6 +144,8 @@ export async function postAmbientLook(configuration, {
   screenshotBytes,
   capturedAt,
   signal,
+  onFrame,
+  playPromptMessage = "",
 } = {}) {
   return streamMessageTurn({
     neuralNexusApiBaseUrl: configuration.neuralNexusApiBaseUrl,
@@ -111,14 +156,36 @@ export async function postAmbientLook(configuration, {
       threadId: configuration.threadId,
       userTimezone: configuration.userTimezone,
       capturedAt,
+      playPromptMessage,
     }),
     signal,
+    onFrame,
+  });
+}
+
+export async function postTypedChatTurn(configuration, {
+  playPromptMessage,
+  signal,
+  onFrame,
+} = {}) {
+  return streamMessageTurn({
+    neuralNexusApiBaseUrl: configuration.neuralNexusApiBaseUrl,
+    apiKey: configuration.apiKey,
+    assistantId: configuration.assistantId,
+    formData: buildTypedChatFormData({
+      playPromptMessage,
+      threadId: configuration.threadId,
+      userTimezone: configuration.userTimezone,
+    }),
+    signal,
+    onFrame,
   });
 }
 
 export async function postIdlePlayTurn(configuration, {
   playPromptMessage,
   signal,
+  onFrame,
 } = {}) {
   return streamMessageTurn({
     neuralNexusApiBaseUrl: configuration.neuralNexusApiBaseUrl,
@@ -130,6 +197,7 @@ export async function postIdlePlayTurn(configuration, {
       userTimezone: configuration.userTimezone,
     }),
     signal,
+    onFrame,
   });
 }
 

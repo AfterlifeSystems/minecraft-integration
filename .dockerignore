@@ -1,0 +1,16 @@
+node_modules
+.git
+.env
+.env.*
+!.env.example
+server/world
+server/logs
+server/libraries
+server/.fabric
+server/versions
+server/mods
+server/*.jar
+mods/*.jar
+*.log
+.cursor
+agent-transcripts

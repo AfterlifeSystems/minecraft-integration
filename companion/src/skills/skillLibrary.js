@@ -17,12 +17,22 @@ async function recordIfFake(bot, name, argumentValues) {
 
 function otherPlayerOrNamed(bot, playerName) {
   if (playerName && playerName !== "player") {
-    const named = Object.values(bot.entities || {}).find(
+    const namedEntity = Object.values(bot.entities || {}).find(
       (entity) => entity.username === playerName
     );
-    if (named) {
-      return named;
+    if (namedEntity) {
+      return namedEntity;
     }
+    const namedPlayer = bot.players?.[playerName]?.entity;
+    if (namedPlayer) {
+      return namedPlayer;
+    }
+  }
+  const nearbyFromTab = Object.values(bot.players || {})
+    .map((player) => player?.entity)
+    .find((entity) => entity && entity.username !== bot.username);
+  if (nearbyFromTab) {
+    return nearbyFromTab;
   }
   return firstOtherPlayer(bot);
 }
@@ -43,8 +53,9 @@ export const skillRunners = {
     if (!player) {
       throw new Error("No other player is nearby.");
     }
-    await bot.pathfinder.goto(
-      new goals.GoalFollow(player, Number(range) || 2)
+    bot.pathfinder.setGoal(
+      new goals.GoalFollow(player, Number(range) || 2),
+      true
     );
   },
 

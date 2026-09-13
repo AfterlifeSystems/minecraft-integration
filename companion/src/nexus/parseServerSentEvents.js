@@ -41,11 +41,18 @@ export function collectMessageTurnFromFrames(frames) {
     threadId: null,
     content: "",
     ambientDecision: null,
+    spokenTurnText: "",
     stopped: false,
+    interrupt: null,
   };
   for (const frame of frames) {
     if (!frame || typeof frame !== "object") {
       continue;
+    }
+    if (frame.type === "spoken_turn") {
+      collected.spokenTurnText = String(
+        frame.content || frame.script || collected.spokenTurnText
+      );
     }
     if (frame.type === "turn_started") {
       collected.requestId = frame.request_id ?? collected.requestId;
@@ -56,6 +63,11 @@ export function collectMessageTurnFromFrames(frames) {
     }
     if (frame.type === "ambient_decision") {
       collected.ambientDecision = frame;
+    }
+    if (frame.type === "interrupt") {
+      collected.interrupt = frame.interrupt || null;
+      collected.threadId = frame.thread_id ?? collected.threadId;
+      collected.requestId = frame.request_id ?? collected.requestId;
     }
     if (frame.type === "done") {
       collected.content = frame.content ?? collected.content;

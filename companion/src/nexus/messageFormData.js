@@ -11,6 +11,29 @@ function asBlob(value, mimeType) {
   return new Blob([value], { type: mimeType });
 }
 
+// The first-person Minecraft view is always available. Anubis only attaches
+// look_now when a turn reports live_shares; "what do you see" is the webcam,
+// and ambient looks already ride as screen.jpg.
+export const LIVE_MINECRAFT_SHARES = '["webcam","screen"]';
+
+function appendLiveMinecraftShares(formData) {
+  formData.append("live_shares", LIVE_MINECRAFT_SHARES);
+}
+
+export function lookNowFileName(sourceName) {
+  return sourceName === "webcam" ? "webcam.jpg" : "screen.jpg";
+}
+
+export function requestedLookSources(interruptSources) {
+  const names = (Array.isArray(interruptSources) ? interruptSources : [])
+    .map((source) => String(source || "").trim().toLowerCase())
+    .filter((source) => source === "webcam" || source === "screen");
+  if (names.length) {
+    return [...new Set(names)];
+  }
+  return ["webcam", "screen"];
+}
+
 export function buildSpokenTurnFormData({
   playPromptMessage = "",
   utteranceBytes,
@@ -36,6 +59,7 @@ export function buildSpokenTurnFormData({
   if (userTimezone) {
     formData.append("user_timezone", userTimezone);
   }
+  appendLiveMinecraftShares(formData);
   return formData;
 }
 
@@ -45,16 +69,23 @@ export function buildAmbientLookFormData({
   threadId,
   userTimezone,
   capturedAt,
+  playPromptMessage = "",
+  includeLiveShares = false,
 } = {}) {
   const formData = new FormData();
-  formData.append("message", "");
+  formData.append("message", playPromptMessage ?? "");
   formData.append("stream", "true");
   formData.append("ambient", "true");
   formData.append("voice_mode", "true");
   formData.append("camera_facing", "world");
   formData.append("captured_at", capturedAt ?? new Date().toISOString());
-  formData.append("sources", JSON.stringify(["screen"]));
+  formData.append("sources", JSON.stringify(["webcam", "screen"]));
   if (screenshotBytes) {
+    formData.append(
+      "files",
+      asBlob(screenshotBytes, "image/jpeg"),
+      "webcam.jpg"
+    );
     formData.append(
       "files",
       asBlob(screenshotBytes, "image/jpeg"),
@@ -67,7 +98,22 @@ export function buildAmbientLookFormData({
   if (userTimezone) {
     formData.append("user_timezone", userTimezone);
   }
+  if (includeLiveShares) {
+    appendLiveMinecraftShares(formData);
+  }
   return formData;
+}
+
+export function buildTypedChatFormData({
+  playPromptMessage = "",
+  threadId,
+  userTimezone,
+} = {}) {
+  return buildIdlePlayFormData({
+    playPromptMessage,
+    threadId,
+    userTimezone,
+  });
 }
 
 export function buildIdlePlayFormData({
@@ -81,6 +127,34 @@ export function buildIdlePlayFormData({
   formData.append("voice_mode", "true");
   if (threadId) {
     formData.append("thread_id", threadId);
+  }
+  if (userTimezone) {
+    formData.append("user_timezone", userTimezone);
+  }
+  appendLiveMinecraftShares(formData);
+  return formData;
+}
+
+export function buildLookNowResumeFormData({
+  threadId,
+  screenshotBytes,
+  requestedSources = [],
+  userTimezone,
+} = {}) {
+  const formData = new FormData();
+  formData.append("thread_id", threadId);
+  formData.append("decision", "looked");
+  appendLiveMinecraftShares(formData);
+  const sources = requestedLookSources(requestedSources);
+  if (screenshotBytes) {
+    for (const source of sources) {
+      formData.append(
+        "files",
+        asBlob(screenshotBytes, "image/jpeg"),
+        lookNowFileName(source)
+      );
+    }
+    formData.append("sources", JSON.stringify(sources));
   }
   if (userTimezone) {
     formData.append("user_timezone", userTimezone);

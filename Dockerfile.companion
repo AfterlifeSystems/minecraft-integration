@@ -1,0 +1,21 @@
+FROM node:20-bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    ffmpeg \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY companion ./companion
+COPY companion/docker-entrypoint.sh /usr/local/bin/companion-entrypoint.sh
+RUN chmod +x /usr/local/bin/companion-entrypoint.sh
+
+ENTRYPOINT ["companion-entrypoint.sh"]

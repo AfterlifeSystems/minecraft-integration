@@ -130,7 +130,7 @@ They do not type the UDP address. Test from a phone hotspot, not from the same W
 
 Verify the playit account email. An unverified account shows the agent as not connected and loads zero tunnels.
 
-## ngrok (TCP join only)
+## ngrok (TCP join only) (for the minecraft server; port forwarding is for the UDP voice connection)
 
 Official Minecraft notes: [Using ngrok with Minecraft](https://ngrok.com/docs/using-ngrok-with/minecraft).
 

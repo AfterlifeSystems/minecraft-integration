@@ -7,20 +7,18 @@ import {
 import { consumeServerSentEventBuffer } from "../companion/src/nexus/parseServerSentEvents.js";
 import { collectMessageTurnFromFrames } from "../companion/src/nexus/parseServerSentEvents.js";
 
-test("conversation message leads with the person's words and keeps commands latent", () => {
+test("conversation message is the person's words as-is and never a play prompt", () => {
   const prompt = buildMinecraftPlayPrompt({
     worldSnapshotText: "position: 0, 64, 0",
     kidSpeechText: "where do you work?",
   });
-  assert.ok(prompt.startsWith("where do you work?"));
-  assert.match(prompt, /<LATENT_MINECRAFT_BODY>/);
-  assert.match(prompt, /zero commands/);
+  assert.equal(prompt, "where do you work?");
+  assert.doesNotMatch(prompt, /LATENT_MINECRAFT_BODY/);
+  assert.doesNotMatch(prompt, /MINECRAFT_WORLD/);
   assert.doesNotMatch(prompt, /Mineflayer/);
-  assert.doesNotMatch(prompt, /Play the game/);
   for (const name of MINECRAFT_PLAY_COMMAND_NAMES) {
-    assert.match(prompt, new RegExp(`!${name}`));
+    assert.doesNotMatch(prompt, new RegExp(`!${name}`));
   }
-  assert.match(prompt, /position: 0, 64, 0/);
 });
 
 test("SSE collector keeps thread_id and done content", () => {
@@ -53,4 +51,19 @@ test("spoken_turn frame keeps the heard script for body intents", () => {
   );
   const collected = collectMessageTurnFromFrames(frames);
   assert.equal(collected.spokenTurnText, "follow me");
+});
+
+test("SSE collector keeps minecraft_act commands and as-is text", () => {
+  const { frames } = consumeServerSentEventBuffer(
+    [
+      'data: {"type":"minecraft_act","commands":[{"name":"follow","arguments":[]}],"additional_as_is_text":"stay close"}\n\n',
+      'data: {"type":"done","content":"On my way.","thread_id":"t1"}\n\n',
+    ].join("")
+  );
+  const collected = collectMessageTurnFromFrames(frames);
+  assert.equal(collected.content, "On my way.");
+  assert.deepEqual(collected.minecraftAct, {
+    commands: [{ name: "follow", arguments: [] }],
+    additional_as_is_text: "stay close",
+  });
 });

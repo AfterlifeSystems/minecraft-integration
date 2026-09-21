@@ -37,11 +37,18 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
+  # playit.gg agent: dials out from this host, so no router port forward is needed.
+  # The playit dashboard owns the two tunnels:
+  #   Minecraft Java (TCP) -> 127.0.0.1:25565
+  #   Simple Voice Chat (UDP) -> 127.0.0.1:24454
+  # PLAYIT_SECRET_KEY lives in .env and never in this file: docker-compose.yml is
+  # committed to a public repository.
   playit:
     image: ghcr.io/playit-cloud/playit-agent:1.0
     network_mode: host
     environment:
-    - SECRET_KEY=8e27e9c574f564f03a987356c099ce80ea081f0716c05eb35f5feadb30361b8c
+      SECRET_KEY: ${PLAYIT_SECRET_KEY:-}
+    restart: unless-stopped
 
   # Inert: `docker compose up` does not start this service.
   # TCP join only. No UDP. Do not set VOICE_HOST to the ngrok hostname.

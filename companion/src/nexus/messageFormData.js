@@ -20,8 +20,19 @@ function appendLiveMinecraftShares(formData) {
   formData.append("live_shares", LIVE_MINECRAFT_SHARES);
 }
 
+function appendMinecraftBody(formData, minecraftWorldSnapshot) {
+  formData.append("minecraft_body", "true");
+  formData.append("minecraft_world", minecraftWorldSnapshot ?? "");
+}
+
 export function lookNowFileName(sourceName) {
   return sourceName === "webcam" ? "webcam.jpg" : "screen.jpg";
+}
+
+// Inverse of lookNowFileName, so the declared sources field and the attached
+// file always name the same single source.
+export function lookSourceForFileName(fileName) {
+  return fileName === "webcam.jpg" ? "webcam" : "screen";
 }
 
 export function requestedLookSources(interruptSources) {
@@ -40,6 +51,7 @@ export function buildSpokenTurnFormData({
   utteranceFileName = "utterance.wav",
   threadId,
   userTimezone,
+  minecraftWorldSnapshot = "",
 } = {}) {
   const formData = new FormData();
   formData.append("message", playPromptMessage ?? "");
@@ -60,6 +72,7 @@ export function buildSpokenTurnFormData({
     formData.append("user_timezone", userTimezone);
   }
   appendLiveMinecraftShares(formData);
+  appendMinecraftBody(formData, minecraftWorldSnapshot);
   return formData;
 }
 
@@ -79,13 +92,13 @@ export function buildAmbientLookFormData({
   formData.append("voice_mode", "true");
   formData.append("camera_facing", "world");
   formData.append("captured_at", capturedAt ?? new Date().toISOString());
-  formData.append("sources", JSON.stringify(["webcam", "screen"]));
+  formData.append(
+    "sources",
+    JSON.stringify([lookSourceForFileName(screenshotFileName)])
+  );
+  // One first-person JPEG per ambient look. Attaching the same JPEG a second
+  // time under another file name charged image tokens twice per ambient look.
   if (screenshotBytes) {
-    formData.append(
-      "files",
-      asBlob(screenshotBytes, "image/jpeg"),
-      "webcam.jpg"
-    );
     formData.append(
       "files",
       asBlob(screenshotBytes, "image/jpeg"),
@@ -108,11 +121,13 @@ export function buildTypedChatFormData({
   playPromptMessage = "",
   threadId,
   userTimezone,
+  minecraftWorldSnapshot = "",
 } = {}) {
   return buildIdlePlayFormData({
     playPromptMessage,
     threadId,
     userTimezone,
+    minecraftWorldSnapshot,
   });
 }
 
@@ -120,6 +135,7 @@ export function buildIdlePlayFormData({
   playPromptMessage = "",
   threadId,
   userTimezone,
+  minecraftWorldSnapshot = "",
 } = {}) {
   const formData = new FormData();
   formData.append("message", playPromptMessage ?? "");
@@ -132,6 +148,7 @@ export function buildIdlePlayFormData({
     formData.append("user_timezone", userTimezone);
   }
   appendLiveMinecraftShares(formData);
+  appendMinecraftBody(formData, minecraftWorldSnapshot);
   return formData;
 }
 
@@ -140,11 +157,13 @@ export function buildLookNowResumeFormData({
   screenshotBytes,
   requestedSources = [],
   userTimezone,
+  minecraftWorldSnapshot = "",
 } = {}) {
   const formData = new FormData();
   formData.append("thread_id", threadId);
   formData.append("decision", "looked");
   appendLiveMinecraftShares(formData);
+  appendMinecraftBody(formData, minecraftWorldSnapshot);
   const sources = requestedLookSources(requestedSources);
   if (screenshotBytes) {
     for (const source of sources) {

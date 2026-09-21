@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parsePlayCommands } from "../companion/src/actions/parsePlayCommands.js";
+import {
+  commandsFromMinecraftAct,
+  parsePlayCommands,
+} from "../companion/src/actions/parsePlayCommands.js";
 
 test("strips Mindcraft command lines from spoken text", () => {
   const parsed = parsePlayCommands(
@@ -26,4 +29,20 @@ test("drops invented command names", () => {
   const parsed = parsePlayCommands("Hi\n!explodeTheWorld(1)");
   assert.equal(parsed.spokenText, "Hi");
   assert.deepEqual(parsed.commands, []);
+});
+
+test("reads commands from a minecraft_act frame and drops invented names", () => {
+  assert.deepEqual(
+    commandsFromMinecraftAct({
+      commands: [
+        { name: "follow", arguments: [] },
+        { name: "explodeWorld", arguments: [] },
+        { name: "goto", arguments: [100, 64, -20] },
+      ],
+    }),
+    [
+      { name: "follow", arguments: [] },
+      { name: "goto", arguments: [100, 64, -20] },
+    ]
+  );
 });

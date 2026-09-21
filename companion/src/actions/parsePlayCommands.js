@@ -88,6 +88,28 @@ function commandsFromFence(sourceText) {
   }
 }
 
+export function commandsFromMinecraftAct(minecraftAct) {
+  const raw = minecraftAct?.commands;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+      const commandName = allowedCommand(item.name);
+      if (!commandName) {
+        return null;
+      }
+      return {
+        name: commandName,
+        arguments: Array.isArray(item.arguments) ? item.arguments : [],
+      };
+    })
+    .filter(Boolean);
+}
+
 export function parsePlayCommands(replyText) {
   const source = String(replyText || "");
   const commands = [];

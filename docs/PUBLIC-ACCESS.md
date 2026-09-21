@@ -27,7 +27,7 @@ This server is `online-mode=false`. Anyone who has the public address can join u
 |---|---|---|---|---|
 | Same LAN | LAN IPv4 `:25565` | Set `VOICE_HOST` to that IPv4 | Nothing | No |
 | Home router port forward | WAN IPv4 `:25565` | Set `VOICE_HOST` to the WAN IPv4 | Nothing | No |
-| [playit.gg](https://playit.gg) | playit TCP host:port | playit UDP host:port in `VOICE_HOST` | Nothing | Only if you added a `playit` service |
+| [playit.gg](https://playit.gg) | playit TCP host:port | playit UDP host:port in `VOICE_HOST` | Nothing | Yes, the `playit` service starts with `docker compose up` |
 | ngrok | ngrok TCP host:port | **Not ngrok.** Use a home UDP forward, IPv6, playit, or a VPN | Nothing | Only with `--profile ngrok` |
 | Public VPS (EC2) | Instance IPv4 `:25565` | Set `VOICE_HOST` to that IPv4 | Nothing | No |
 
@@ -117,18 +117,62 @@ They do not type the UDP address. Test from a phone hotspot, not from the same W
 
 ## playit.gg
 
-[playit.gg](https://playit.gg) is a paid-leaning NAT bypass: the host agent dials out, and players paste a hostname. [Premium is $3/month](https://playit.gg/pricing). The free game list includes Minecraft Java and Simple Voice Chat, but extra tunnel types, HTTPS, and custom domains require Premium. Use it only when you stay behind NAT and do not want a VPN client or inbound ports.
+[playit.gg](https://playit.gg) is a NAT bypass: the playit agent dials out from this host, and players paste a hostname. No router port forward, no inbound ports. [Premium is $3/month](https://playit.gg/pricing); the free game list includes Minecraft Java and Simple Voice Chat, while extra tunnel types, HTTPS, and custom domains require Premium.
 
-1. Start Fabric (`server/start.sh` or `docker compose up`) so port `25565` is listening.
-2. On the host, install and run the playit agent (Linux: follow the current playit Linux install; then `playit`).
-3. In the playit dashboard create:
-   - a **Minecraft Java** / TCP tunnel to `127.0.0.1:25565`
-   - a **UDP** tunnel to `127.0.0.1:24454` (Simple Voice Chat)
-4. Copy the TCP address playit prints (hostname **and** port, for example `random-name.playit.gg:12345`).
-5. After the first Fabric start, set Simple Voice Chat to the **UDP** address playit printed (`VOICE_HOST` in `.env`, or `voice_host` in `server/config/voicechat/voicechat-server.properties`). Recreate or restart Fabric.
-6. Send each player the two jars and the playit **TCP** address and port.
+The `playit` service in `docker-compose.yml` runs the agent and starts with a plain `docker compose up`. The service reads `PLAYIT_SECRET_KEY` from `.env`; never paste the playit secret key into `docker-compose.yml`, because `docker-compose.yml` is committed to a public repository.
 
-Verify the playit account email. An unverified account shows the agent as not connected and loads zero tunnels.
+### Agent setup
+
+1. Start Fabric (`docker compose up`) so TCP `25565` and UDP `24454` are listening on the host.
+2. Create a playit account, verify the playit account email, and create an agent. An unverified playit account shows the agent as not connected and loads zero tunnels.
+3. Put the agent secret key in `.env`:
+
+   ```bash
+   PLAYIT_SECRET_KEY=<secret key from the playit dashboard>
+   ```
+
+4. Start or recreate the agent:
+
+   ```bash
+   docker compose up -d --force-recreate --no-deps playit
+   docker logs -f minecraft-integration-playit-1
+   ```
+
+   A healthy agent logs `playit connected; tunnels loaded` with `tunnel_count=2` and `account_status="verified"`.
+
+### Tunnels the playit dashboard must define
+
+| Tunnel type | Local address the tunnel points at | What players use |
+|---|---|---|
+| Minecraft Java (TCP) | `127.0.0.1:25565` | the playit TCP hostname and port |
+| Simple Voice Chat (UDP) | `127.0.0.1:24454` | nothing typed; `VOICE_HOST` carries the playit UDP hostname and port |
+
+The playit UDP port is usually **not** `24454`. The local port stays `24454`; only the public playit port changes.
+
+### Point Simple Voice Chat at the playit UDP tunnel
+
+Simple Voice Chat sends `voice_host` to every client, and the client dials `voice_host` for voice traffic. Set `VOICE_HOST` to the playit **UDP** hostname **and** the playit UDP port in `.env`:
+
+```bash
+VOICE_HOST=<playit UDP hostname>:<playit UDP port>
+```
+
+Never set `VOICE_HOST` to the playit TCP hostname, to `fabric-server`, or to `127.0.0.1`.
+
+Recreate Fabric so the entrypoint writes the new `voice_host` into `config/voicechat/voicechat-server.properties`:
+
+```bash
+docker compose up -d --force-recreate --no-deps fabric-server
+docker exec minecraft-integration-fabric-server-1 \
+  grep '^voice_host=' /minecraft/config/voicechat/voicechat-server.properties
+```
+
+### Send the player
+
+- the two jars from `mods/` (Fabric API + Simple Voice Chat **2.5.28**)
+- the playit **TCP** hostname and port for Multiplayer
+
+The player never types the playit UDP address. Simple Voice Chat picks the playit UDP address up from `voice_host` on join.
 
 ## ngrok (TCP join only) (for the minecraft server; port forwarding is for the UDP voice connection)
 

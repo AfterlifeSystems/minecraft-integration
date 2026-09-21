@@ -149,7 +149,7 @@ Press **T** and mention the avatar. That line is the Neural Nexus message box. Y
 
 Typed chat and push-to-talk both queue. One does not cancel the other.
 
-Full phrase list, latent skills, and host commands: [docs/COMMANDS.md](docs/COMMANDS.md). Player join sheet: [docs/KID.md](docs/KID.md).
+Full phrase list, latent skills, and host commands: [docs/COMMANDS.md](docs/COMMANDS.md). Player join sheet: [docs/KID.md](docs/KID.md). Manual pass/fail sheet for the graph tool: [docs/MANUAL-TESTING.md](docs/MANUAL-TESTING.md).
 
 ---
 
@@ -192,7 +192,7 @@ Optional. Blank uses the default.
 | `MINECRAFT_USERNAME` | `NeuralNexus` | Offline name players mention |
 | `MINECRAFT_AUTH` | `offline` | Server is `online-mode=false`. Do not use Microsoft login. |
 | `USER_TIMEZONE` | (empty) | IANA zone sent as `user_timezone` on `/message` |
-| `AMBIENT_CAPTURE_INTERVAL_SECONDS` | `30` | How often the body sends a first-person look |
+| `AMBIENT_CAPTURE_INTERVAL_SECONDS` | `30` | How often the body sends a first-person look. `-1` disables ambient capture completely. Values below `1` are rejected at startup. |
 | `IDLE_PLAY_INTERVAL_SECONDS` | `45` | How often the body asks the API to keep playing when nobody is talking |
 | `VOICE_PLAYBACK` | `auto` | Cloned voice through Simple Voice Chat, or `ffplay` on the host. `off` skips playback. |
 | `VOICE_HOST` | (empty) | Address **players** use for Simple Voice Chat UDP (VPN or public IP). Never `fabric-server`. |

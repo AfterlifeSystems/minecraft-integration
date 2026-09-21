@@ -1,5 +1,6 @@
 const LEAKED_PROMPT_PATTERNS = [
   /<LATENT_MINECRAFT_BODY>[\s\S]*?<\/LATENT_MINECRAFT_BODY>/gi,
+  /<MINECRAFT_BODY>[\s\S]*?<\/MINECRAFT_BODY>/gi,
   /<MINECRAFT_WORLD>[\s\S]*?<\/MINECRAFT_WORLD>/gi,
   /Closed command list:[^\n]*/gi,
   /This block is not the conversation[^\n]*/gi,

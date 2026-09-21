@@ -44,6 +44,7 @@ export function collectMessageTurnFromFrames(frames) {
     spokenTurnText: "",
     stopped: false,
     interrupt: null,
+    minecraftAct: null,
   };
   for (const frame of frames) {
     if (!frame || typeof frame !== "object") {
@@ -68,6 +69,30 @@ export function collectMessageTurnFromFrames(frames) {
       collected.interrupt = frame.interrupt || null;
       collected.threadId = frame.thread_id ?? collected.threadId;
       collected.requestId = frame.request_id ?? collected.requestId;
+    }
+    if (frame.type === "minecraft_act") {
+      const incomingCommands = Array.isArray(frame.commands)
+        ? frame.commands
+        : [];
+      const incomingAsIs =
+        frame.additional_as_is_text == null
+          ? ""
+          : String(frame.additional_as_is_text);
+      if (!collected.minecraftAct) {
+        collected.minecraftAct = {
+          commands: incomingCommands,
+          additional_as_is_text: incomingAsIs,
+        };
+      } else {
+        collected.minecraftAct = {
+          commands: [
+            ...collected.minecraftAct.commands,
+            ...incomingCommands,
+          ],
+          additional_as_is_text:
+            incomingAsIs || collected.minecraftAct.additional_as_is_text,
+        };
+      }
     }
     if (frame.type === "done") {
       collected.content = frame.content ?? collected.content;

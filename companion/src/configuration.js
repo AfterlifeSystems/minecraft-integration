@@ -2,11 +2,30 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const DEFAULT_AMBIENT_CAPTURE_INTERVAL_SECONDS = 30;
+
+// AMBIENT_CAPTURE_INTERVAL_SECONDS=-1 turns ambient capture off completely:
+// no timer, no first-person JPEG, no ambient spend. The avatar still sees on
+// demand through look_now.
+export const AMBIENT_CAPTURE_DISABLED = -1;
 const DEFAULT_IDLE_PLAY_INTERVAL_SECONDS = 45;
 const DEFAULT_MINECRAFT_SERVER_PORT = 25565;
 const DEFAULT_MINECRAFT_AUTH = "offline";
 const DEFAULT_MINECRAFT_USERNAME = "NeuralNexus";
 const DEFAULT_VOICE_PLAYBACK = "auto";
+
+export function parseDotEnvValue(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  // An unquoted value ends at a trailing comment. Without this strip,
+  // AMBIENT_CAPTURE_INTERVAL_SECONDS=-1 # off parses as the string "-1 # off"
+  // rather than the number -1.
+  return value.replace(/\s+#.*$/, "").trim();
+}
 
 function loadDotEnvFile(filePath) {
   if (!existsSync(filePath)) {
@@ -23,13 +42,7 @@ function loadDotEnvFile(filePath) {
       continue;
     }
     const key = line.slice(0, separatorIndex).trim();
-    let value = line.slice(separatorIndex + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
+    const value = parseDotEnvValue(line.slice(separatorIndex + 1));
     if (process.env[key] === undefined) {
       process.env[key] = value;
     }
@@ -61,6 +74,33 @@ function optionalInteger(name, fallback) {
   return parsed;
 }
 
+export function ambientCaptureIsDisabled(ambientCaptureIntervalSeconds) {
+  return ambientCaptureIntervalSeconds === AMBIENT_CAPTURE_DISABLED;
+}
+
+export function normalizeAmbientCaptureIntervalSeconds(seconds) {
+  if (seconds < 0) {
+    return AMBIENT_CAPTURE_DISABLED;
+  }
+  if (seconds < 1) {
+    // setInterval treats a zero delay as "fire every millisecond", which sent
+    // ambient looks back to back for as long as the companion stayed up.
+    throw new Error(
+      "AMBIENT_CAPTURE_INTERVAL_SECONDS must be at least 1, or -1 to disable ambient capture."
+    );
+  }
+  return seconds;
+}
+
+function ambientCaptureIntervalSecondsFromEnvironment() {
+  return normalizeAmbientCaptureIntervalSeconds(
+    optionalInteger(
+      "AMBIENT_CAPTURE_INTERVAL_SECONDS",
+      DEFAULT_AMBIENT_CAPTURE_INTERVAL_SECONDS
+    )
+  );
+}
+
 export function loadCompanionConfiguration(repositoryRoot = process.cwd()) {
   loadDotEnvFile(resolve(repositoryRoot, ".env"));
 
@@ -84,10 +124,7 @@ export function loadCompanionConfiguration(repositoryRoot = process.cwd()) {
     ),
     minecraftAuth: optionalText("MINECRAFT_AUTH", DEFAULT_MINECRAFT_AUTH),
     userTimezone: optionalText("USER_TIMEZONE", ""),
-    ambientCaptureIntervalSeconds: optionalInteger(
-      "AMBIENT_CAPTURE_INTERVAL_SECONDS",
-      DEFAULT_AMBIENT_CAPTURE_INTERVAL_SECONDS
-    ),
+    ambientCaptureIntervalSeconds: ambientCaptureIntervalSecondsFromEnvironment(),
     idlePlayIntervalSeconds: optionalInteger(
       "IDLE_PLAY_INTERVAL_SECONDS",
       DEFAULT_IDLE_PLAY_INTERVAL_SECONDS

@@ -1,5 +1,6 @@
 import { installFlushingConsole } from "./bot/flushingConsole.js";
 import {
+  ambientCaptureIsDisabled,
   assistantIdFingerprint,
   loadCompanionConfiguration,
 } from "./configuration.js";
@@ -12,8 +13,11 @@ import {
   speakText,
   stopMessageTurn,
 } from "./nexus/neuralNexusApi.js";
-import { firstOtherPlayer } from "./world/worldSnapshot.js";
-import { parsePlayCommands } from "./actions/parsePlayCommands.js";
+import { buildWorldSnapshotText, firstOtherPlayer } from "./world/worldSnapshot.js";
+import {
+  commandsFromMinecraftAct,
+  parsePlayCommands,
+} from "./actions/parsePlayCommands.js";
 import { executePlayCommands } from "./actions/executePlayCommands.js";
 import { createMinecraftBot } from "./bot/createMinecraftBot.js";
 import { captureFirstPersonScreenshot } from "./bot/captureFirstPersonScreenshot.js";
@@ -49,9 +53,12 @@ let drainingTurns = false;
 const MAXIMUM_LOOKS_PER_TURN = 2;
 const MINIMUM_SPOKEN_UTTERANCE_BYTES = 12000;
 const VOICE_QUIET_AFTER_PLAYBACK_MS = 4000;
+const POSITION_LOG_INTERVAL_MS = 10000;
 let bot;
 let ambientTimer = null;
 let idleTimer = null;
+let positionLogTimer = null;
+let lastLoggedPositionText = null;
 let reconnectTimer = null;
 let lastBodyGoalName = null;
 let ambientLookInFlight = false;
@@ -109,11 +116,22 @@ function startMinecraftCompanion() {
     if (idleTimer) {
       clearInterval(idleTimer);
     }
-    ambientTimer = setInterval(() => {
-      sendAmbientLook().catch((error) => {
-        console.warn("Ambient look failed:", error.message);
-      });
-    }, configuration.ambientCaptureIntervalSeconds * 1000);
+    if (positionLogTimer) {
+      clearInterval(positionLogTimer);
+    }
+    logCompanionWorldPosition();
+    positionLogTimer = setInterval(logCompanionWorldPosition, POSITION_LOG_INTERVAL_MS);
+    if (ambientCaptureIsDisabled(configuration.ambientCaptureIntervalSeconds)) {
+      console.log(
+        "Ambient capture disabled (AMBIENT_CAPTURE_INTERVAL_SECONDS=-1); the avatar looks only on demand."
+      );
+    } else {
+      ambientTimer = setInterval(() => {
+        sendAmbientLook().catch((error) => {
+          console.warn("Ambient look failed:", error.message);
+        });
+      }, configuration.ambientCaptureIntervalSeconds * 1000);
+    }
 
     idleTimer = setInterval(() => {
       sendIdlePlayTurn().catch((error) => {
@@ -132,6 +150,11 @@ function startMinecraftCompanion() {
       clearInterval(idleTimer);
       idleTimer = null;
     }
+    if (positionLogTimer) {
+      clearInterval(positionLogTimer);
+      positionLogTimer = null;
+    }
+    lastLoggedPositionText = null;
     if (reconnectTimer) {
       return;
     }
@@ -146,6 +169,33 @@ startMinecraftCompanion();
 
 function conversationMessage(kidSpeechText = "") {
   return String(kidSpeechText || "").trim();
+}
+
+function refreshMinecraftWorldSnapshot() {
+  configuration.minecraftWorldSnapshot = buildWorldSnapshotText(bot);
+  logCompanionWorldPosition();
+}
+
+// Print the companion's coordinates, dimension, and biome so `docker compose
+// logs -f companion` shows where in the world the companion currently stands.
+// A repeated line is skipped so a stationary companion does not flood the log.
+function logCompanionWorldPosition() {
+  const companionEntity = bot?.entity;
+  if (!companionEntity) {
+    return;
+  }
+  const companionPosition = companionEntity.position;
+  const companionDimension = bot.game?.dimension || "unknown";
+  const companionBiome = bot.blockAt(companionPosition)?.biome?.name || "unknown";
+  const positionText =
+    `Companion position x=${companionPosition.x.toFixed(1)} ` +
+    `y=${companionPosition.y.toFixed(1)} z=${companionPosition.z.toFixed(1)} ` +
+    `dimension=${companionDimension} biome=${companionBiome}`;
+  if (positionText === lastLoggedPositionText) {
+    return;
+  }
+  lastLoggedPositionText = positionText;
+  console.log(positionText);
 }
 
 function playerTurnIsInFlight() {
@@ -246,6 +296,7 @@ async function answerLookNowPauses(turn, signal) {
     } else {
       console.warn("look_now had no first-person JPEG");
     }
+    refreshMinecraftWorldSnapshot();
     currentTurn = await postLookNowResume(configuration, {
       threadId: currentTurn.threadId || configuration.threadId,
       screenshotBytes,
@@ -264,10 +315,17 @@ async function answerLookNowPauses(turn, signal) {
 
 async function handleReply(turn) {
   rememberThread(turn);
-  const { spokenText: rawSpokenText, commands } = parsePlayCommands(
-    turn.content || ""
-  );
+  const fromFrame = commandsFromMinecraftAct(turn.minecraftAct);
+  const { spokenText: rawSpokenText, commands: parsedCommands } =
+    parsePlayCommands(turn.content || "");
   const spokenText = stripLeakedSystemPrompt(rawSpokenText);
+  const commands = fromFrame.length ? fromFrame : parsedCommands;
+  const additionalAsIsText = String(
+    turn.minecraftAct?.additional_as_is_text || ""
+  );
+  if (additionalAsIsText) {
+    console.log("Minecraft additional as-is text:", additionalAsIsText.slice(0, 160));
+  }
   const commandWork = commands.length
     ? executePlayCommands(bot, commands, {
         abortSignal: playAbort.controller?.signal,
@@ -452,6 +510,7 @@ async function postMessageTurnOrRetry(kind, startTurn, signal) {
 }
 
 async function postTypedChatTurnOrRetry(mentionedText, signal) {
+  refreshMinecraftWorldSnapshot();
   return postMessageTurnOrRetry(
     "typed chat",
     () =>
@@ -465,6 +524,7 @@ async function postTypedChatTurnOrRetry(mentionedText, signal) {
 }
 
 async function postSpokenTurnOrRetry(utteranceBytes, signal) {
+  refreshMinecraftWorldSnapshot();
   return postMessageTurnOrRetry(
     "spoken chat",
     () =>

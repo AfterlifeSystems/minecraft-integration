@@ -187,7 +187,8 @@ A question should **not** be followed by `Running follow` or `Running collectBlo
 
 | Loop | Interval (defaults) | What the companion sends |
 |---|---|---|
-| Ambient look | `AMBIENT_CAPTURE_INTERVAL_SECONDS` = 30 | First-person JPEG as a live webcam + screen share (`live_shares`). Anubis may speak and/or emit autonomous `!` skills from what it sees. Asking **what do you see?** takes a fresh look (`look_now`) of that same view. |
+| Ambient look | `AMBIENT_CAPTURE_INTERVAL_SECONDS` = 30, `-1` to disable | One first-person JPEG per look, attached once as the `screen` source. Anubis may speak and/or emit autonomous `!` skills from what the first-person JPEG shows. |
+| Look on demand (`look_now`) | not a loop — Anubis decides | Attached on every turn that reports `minecraft_body`, so Anubis calls `look_now` when what is in the world decides the answer or the next action. At most 2 looks per turn (`MAXIMUM_LOOKS_PER_TURN`). Asking **what do you see?** takes one. With ambient capture at `-1`, `look_now` is the only way Anubis sees the world. |
 | Idle play | `IDLE_PLAY_INTERVAL_SECONDS` = 45 | Latent body only. Prefer silence. May continue an obvious current job. |
 | World snapshot | every user / idle turn | Position, yaw/pitch, dimension, biome, time, health, food, held item, inventory, nearby players, nearby block names. |
 
@@ -253,7 +254,7 @@ Required in `.env`: `NEURAL_NEXUS_API_BASE_URL`, `API_KEY`, `ASSISTANT_ID`.
 | `VOICE_PLAYBACK` | `auto` = SVC `sendAudio` (else host `ffplay`). `off` = chat and skills only. |
 | `VOICE_HOST` | Address **players** use for SVC UDP (VPN / public IP). Never `fabric-server`. |
 | `USER_TIMEZONE` | Sent as `user_timezone` on `/message`. |
-| `AMBIENT_CAPTURE_INTERVAL_SECONDS` | Ambient look period. |
+| `AMBIENT_CAPTURE_INTERVAL_SECONDS` | Ambient look period in seconds. `-1` disables ambient capture completely; the avatar then sees only on demand. A value below `1` is rejected at startup, because a zero period made the companion send ambient looks back to back. |
 | `IDLE_PLAY_INTERVAL_SECONDS` | Idle body period. |
 
 ---

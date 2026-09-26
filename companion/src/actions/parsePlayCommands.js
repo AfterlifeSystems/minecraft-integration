@@ -19,6 +19,8 @@ const JSON_NAME_TO_COMMAND = {
   equip: "equip",
   toss: "toss",
   give: "toss",
+  giveCollected: "giveCollected",
+  give_collected: "giveCollected",
   useOn: "useOn",
   attack: "attack",
   sleep: "sleep",
@@ -29,7 +31,7 @@ const JSON_NAME_TO_COMMAND = {
   walk_to: "goto",
 };
 
-function parseArgumentList(source) {
+export function parseArgumentList(source) {
   const trimmed = String(source || "").trim();
   if (!trimmed) {
     return [];

@@ -44,6 +44,38 @@ function colorForBlockName(blockName) {
   return BLOCK_COLORS.default;
 }
 
+// The sky and the light change with weather and time of day. Without this the
+// drawn view always had a clear blue sky, and "what do you see?" described
+// sunshine in the middle of a thunderstorm.
+const SKY_COLORS = {
+  clear_day: [135, 206, 235],
+  rain_day: [120, 128, 140],
+  thunder_day: [80, 86, 98],
+  clear_night: [12, 16, 40],
+  rain_night: [18, 20, 28],
+  sunset: [230, 140, 90],
+};
+const RAIN_STREAK_COLOR = [190, 200, 215];
+
+export function viewConditions(bot) {
+  const ticks = typeof bot?.time?.timeOfDay === "number" ? bot.time.timeOfDay : 6000;
+  const isNight = ticks >= 13000 && ticks < 23000;
+  const isSunset = (ticks >= 11500 && ticks < 13000) || ticks >= 23000;
+  const raining = Boolean(bot?.isRaining);
+  const thundering = raining && (bot?.thunderState || 0) > 0;
+  let sky = SKY_COLORS.clear_day;
+  if (isNight) sky = raining ? SKY_COLORS.rain_night : SKY_COLORS.clear_night;
+  else if (thundering) sky = SKY_COLORS.thunder_day;
+  else if (raining) sky = SKY_COLORS.rain_day;
+  else if (isSunset) sky = SKY_COLORS.sunset;
+  let brightness = 1;
+  if (isNight) brightness = 0.35;
+  else if (thundering) brightness = 0.6;
+  else if (raining) brightness = 0.75;
+  else if (isSunset) brightness = 0.8;
+  return { sky, brightness, raining };
+}
+
 function lookDirection(yaw, pitch, offsetX, offsetY) {
   const lookYaw = yaw + offsetX;
   const lookPitch = pitch + offsetY;
@@ -67,6 +99,7 @@ export function renderFirstPersonJpeg(bot, {
   const fov = (FIELD_OF_VIEW_DEGREES * Math.PI) / 180;
   const aspect = width / height;
   const pixels = Buffer.alloc(width * height * 4);
+  const { sky, brightness, raining } = viewConditions(bot);
 
   for (let row = 0; row < height; row += 1) {
     for (let column = 0; column < width; column += 1) {
@@ -80,11 +113,22 @@ export function renderFirstPersonJpeg(bot, {
       } catch {
         blockName = "air";
       }
-      const [red, green, blue] = colorForBlockName(blockName);
+      const isSky = blockName === "air";
+      let [red, green, blue] = isSky ? sky : colorForBlockName(blockName);
+      if (!isSky) {
+        red *= brightness;
+        green *= brightness;
+        blue *= brightness;
+      }
+      // Diagonal streaks over every pixel in rain, the way rain crosses the
+      // whole screen in the game, sky and ground alike.
+      if (raining && (column * 3 + row * 2) % 17 === 0) {
+        [red, green, blue] = RAIN_STREAK_COLOR;
+      }
       const index = (row * width + column) * 4;
-      pixels[index] = red;
-      pixels[index + 1] = green;
-      pixels[index + 2] = blue;
+      pixels[index] = Math.round(red);
+      pixels[index + 1] = Math.round(green);
+      pixels[index + 2] = Math.round(blue);
       pixels[index + 3] = 255;
     }
   }

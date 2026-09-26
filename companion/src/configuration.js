@@ -130,6 +130,12 @@ export function loadCompanionConfiguration(repositoryRoot = process.cwd()) {
       DEFAULT_IDLE_PLAY_INTERVAL_SECONDS
     ),
     voicePlayback: optionalText("VOICE_PLAYBACK", DEFAULT_VOICE_PLAYBACK),
+    // Players allowed to type "!" commands. Empty lets every player on the
+    // server type them, as Mindcraft does; a public server names its players.
+    directCommandPlayers: optionalText("DIRECT_COMMAND_PLAYERS", "")
+      .split(",")
+      .map((playerName) => playerName.trim())
+      .filter(Boolean),
   };
 }
 

@@ -9,6 +9,7 @@ import {
   postAmbientLook,
   postLookNowResume,
   postSpokenTurn,
+  postIdlePlayTurn,
   postTypedChatTurn,
   speakText,
   stopMessageTurn,
@@ -19,6 +20,23 @@ import {
   parsePlayCommands,
 } from "./actions/parsePlayCommands.js";
 import { executePlayCommands } from "./actions/executePlayCommands.js";
+import {
+  parseTypedCommand,
+  playerMayTypeCommands,
+  typedCommandHelpLines,
+} from "./actions/typedCommands.js";
+import {
+  createModeState,
+  describeModeState,
+  setModeInState,
+  startModeTick,
+} from "./skills/modes.js";
+import {
+  QUERY_COMMAND_NAMES,
+  pickUpNearbyDrops,
+  resolveCommandName,
+  runSkill,
+} from "./skills/skillLibrary.js";
 import { createMinecraftBot } from "./bot/createMinecraftBot.js";
 import { captureFirstPersonScreenshot } from "./bot/captureFirstPersonScreenshot.js";
 import { playAvatarVoice } from "./bot/playAvatarVoice.js";
@@ -37,6 +55,15 @@ import {
   enqueueUserTurn,
 } from "./bot/userTurnQueue.js";
 import { extractLocalBodyIntent } from "./bot/extractLocalBodyIntent.js";
+import {
+  autonomyMayMoveBody,
+  commandsNotAlreadyRun,
+  createBodyGoalState,
+  describeCommands,
+  mergeMinecraftActs,
+  recordBodyCommands,
+  trackBodyJob,
+} from "./bot/bodyGoalState.js";
 import { wrapSpokenChatLines } from "./bot/splitSpokenChat.js";
 import { stripLeakedSystemPrompt } from "./bot/stripLeakedSystemPrompt.js";
 
@@ -60,7 +87,21 @@ let idleTimer = null;
 let positionLogTimer = null;
 let lastLoggedPositionText = null;
 let reconnectTimer = null;
-let lastBodyGoalName = null;
+const bodyGoalState = createBodyGoalState();
+const modeState = createModeState();
+let modeTimer = null;
+let goalTimer = null;
+let holdReleaseTimer = null;
+// The standing goal set by !goal: while set, the companion prompts Neural
+// Nexus to pick the next commands whenever the body is idle, the way a
+// Mindcraft agent self-prompts. Capped so a goal that never finishes cannot
+// run up an unbounded bill.
+let standingGoal = null;
+let standingGoalTurns = 0;
+const MAXIMUM_GOAL_TURNS = 30;
+const GOAL_TICK_MS = 8000;
+// Set by !stfu: unprompted speech (goal turns, ambient replies) stays quiet.
+let unpromptedSpeechMuted = false;
 let ambientLookInFlight = false;
 let ambientAbortController = null;
 
@@ -109,7 +150,27 @@ function startMinecraftCompanion() {
     console.error("Minecraft bot error:", message);
   });
 
+  installCompanionHooks();
+
   bot.once("spawn", () => {
+    if (modeTimer) {
+      clearInterval(modeTimer);
+    }
+    modeTimer = startModeTick(bot, modeState, {
+      jobInFlight: () => bodyGoalState.jobsInFlight > 0,
+      turnInFlight: () => playerTurnIsInFlight(),
+      mayWalk: () => !bodyGoalState.held && bodyGoalState.goalName !== "follow",
+      pickUpDrops: () => pickUpNearbyDrops(bot),
+      placeBlockBeside: (blockName) => runSkill(bot, { name: "placeBlock", arguments: [blockName] }),
+    });
+    if (goalTimer) {
+      clearInterval(goalTimer);
+    }
+    goalTimer = setInterval(() => {
+      advanceStandingGoal().catch((error) => {
+        console.warn("Goal turn failed:", error.message);
+      });
+    }, GOAL_TICK_MS);
     if (ambientTimer) {
       clearInterval(ambientTimer);
     }
@@ -153,6 +214,14 @@ function startMinecraftCompanion() {
     if (positionLogTimer) {
       clearInterval(positionLogTimer);
       positionLogTimer = null;
+    }
+    if (modeTimer) {
+      clearInterval(modeTimer);
+      modeTimer = null;
+    }
+    if (goalTimer) {
+      clearInterval(goalTimer);
+      goalTimer = null;
     }
     lastLoggedPositionText = null;
     if (reconnectTimer) {
@@ -286,10 +355,8 @@ async function answerLookNowPauses(turn, signal) {
   let lookDepth = 0;
   while (isLookNowInterrupt(currentTurn) && lookDepth < MAXIMUM_LOOKS_PER_TURN) {
     const requestedSources = currentTurn.interrupt?.sources || [];
-    console.log(
-      "look_now requested",
-      requestedSources.join(",") || "webcam,screen"
-    );
+    console.log("look_now requested", requestedSources.join(",") || "screen");
+    const earlierMinecraftAct = currentTurn.minecraftAct;
     const screenshotBytes = await captureFirstPersonScreenshot(bot);
     if (screenshotBytes) {
       console.log("look_now sending first-person JPEG", screenshotBytes.length);
@@ -304,6 +371,11 @@ async function answerLookNowPauses(turn, signal) {
       signal,
       onFrame: rememberStreamingFrame,
     });
+    // Commands the avatar sent before the pause belong to this reply too.
+    currentTurn.minecraftAct = mergeMinecraftActs(
+      earlierMinecraftAct,
+      currentTurn.minecraftAct
+    );
     rememberThread(currentTurn);
     lookDepth += 1;
   }
@@ -313,35 +385,87 @@ async function answerLookNowPauses(turn, signal) {
   return currentTurn;
 }
 
-async function handleReply(turn) {
-  rememberThread(turn);
-  const fromFrame = commandsFromMinecraftAct(turn.minecraftAct);
-  const { spokenText: rawSpokenText, commands: parsedCommands } =
-    parsePlayCommands(turn.content || "");
-  const spokenText = stripLeakedSystemPrompt(rawSpokenText);
-  const commands = fromFrame.length ? fromFrame : parsedCommands;
-  const additionalAsIsText = String(
-    turn.minecraftAct?.additional_as_is_text || ""
-  );
-  if (additionalAsIsText) {
-    console.log("Minecraft additional as-is text:", additionalAsIsText.slice(0, 160));
+// Run body commands from either source and keep the body's goal state honest:
+// a stop holds the body against ambient autonomy, and a running job counts as
+// in flight so autonomy never replaces the job with a walk toward a player.
+// A failed job is said in chat, so a job the avatar announced but the body
+// could not do is visible instead of silent.
+// Commands that leave a running job alone: looking, talking, gestures,
+// memory and settings, and every query. Any other command is a new order, and
+// a new order replaces the job in progress the way a player's new instruction
+// would, so "come here" while gathering wood ends the gathering quietly
+// instead of reporting "Couldn't finish: Digging aborted".
+const COMMANDS_THAT_KEEP_THE_RUNNING_JOB = new Set([
+  "lookAt",
+  "lookAtPlayer",
+  "lookAtPosition",
+  "say_chat",
+  "jump",
+  "sneak",
+  "stfu",
+  "setMode",
+  "rememberHere",
+  "clearChat",
+  "startConversation",
+  "endConversation",
+  "goal",
+  "endGoal",
+  ...QUERY_COMMAND_NAMES,
+]);
+
+function commandReplacesTheRunningJob(command) {
+  const commandName = resolveCommandName(command?.name) || command?.name;
+  return !COMMANDS_THAT_KEEP_THE_RUNNING_JOB.has(commandName);
+}
+
+function runBodyCommands(commands, { abortSignal } = {}) {
+  if (!commands.length) {
+    return Promise.resolve([]);
   }
-  const commandWork = commands.length
-    ? executePlayCommands(bot, commands, {
-        abortSignal: playAbort.controller?.signal,
-        onCommand: (command) => {
-          console.log("Running", command.name, command.arguments);
-        },
-      })
-    : Promise.resolve([]);
-  commandWork.then((results) => {
+  if (commands.some(commandReplacesTheRunningJob)) {
+    bot.nexusJobGeneration = (bot.nexusJobGeneration || 0) + 1;
+  }
+  recordBodyCommands(bodyGoalState, commands);
+  return trackBodyJob(bodyGoalState, () =>
+    executePlayCommands(bot, commands, {
+      abortSignal,
+      onCommand: (command) => {
+        console.log("Running", command.name, command.arguments);
+      },
+    })
+  ).then((results) => {
     const failed = results.filter((result) => result.status === "failed");
     if (failed.length) {
       console.warn(
         "Skill failures:",
         failed.map((result) => `${result.command.name}: ${result.errorMessage}`).join("; ")
       );
+      sayInGameChat(`Couldn't finish: ${failed[0].errorMessage}`);
     }
+    return results;
+  });
+}
+
+async function handleReply(turn, { alreadyRunCommands = [] } = {}) {
+  rememberThread(turn);
+  const fromFrame = commandsFromMinecraftAct(turn.minecraftAct);
+  const { spokenText: rawSpokenText, commands: parsedCommands } =
+    parsePlayCommands(turn.content || "");
+  const spokenText = stripLeakedSystemPrompt(rawSpokenText);
+  const avatarCommands = fromFrame.length ? fromFrame : parsedCommands;
+  console.log(
+    "Avatar act:",
+    avatarCommands.length ? describeCommands(avatarCommands) : "none"
+  );
+  const commands = commandsNotAlreadyRun(avatarCommands, alreadyRunCommands);
+  const additionalAsIsText = String(
+    turn.minecraftAct?.additional_as_is_text || ""
+  );
+  if (additionalAsIsText) {
+    console.log("Minecraft additional as-is text:", additionalAsIsText.slice(0, 160));
+  }
+  runBodyCommands(commands, {
+    abortSignal: playAbort.controller?.signal,
   }).catch((error) => {
     console.warn("Play command failed:", error.message);
   });
@@ -420,6 +544,19 @@ async function handlePlayerChat(username, message) {
   if (!speakerName || speakerName === configuration.minecraftUsername) {
     return;
   }
+  const typedCommand =
+    parseTypedCommand(parsed.typedText) ||
+    parseTypedCommand(
+      String(parsed.typedText || "").replace(
+        new RegExp(`^@?${configuration.minecraftUsername}[,:]?\\s*`, "i"),
+        ""
+      )
+    );
+  if (typedCommand) {
+    await runTypedCommand(speakerName, typedCommand);
+    return;
+  }
+  unpromptedSpeechMuted = false;
   const mentionedText = extractDirectedPlayerText(
     parsed.typedText,
     configuration.minecraftUsername
@@ -450,6 +587,7 @@ async function handlePlayerChat(username, message) {
       console.warn("Local body intent failed:", error.message);
     });
   }
+  const alreadyRunCommands = localCommands;
   acceptUserTurn("typed", async (signal) => {
     await preemptAmbientLook();
     console.log("Sending typed turn to Neural Nexus");
@@ -461,16 +599,15 @@ async function handlePlayerChat(username, message) {
       "Neural Nexus typed reply:",
       String(turn.content || "").replace(/\s+/g, " ").trim().slice(0, 160)
     );
-    await handleReply(turn);
+    await handleReply(turn, { alreadyRunCommands });
   });
 }
 
 async function runLocalBodyIntent(typedText) {
   const commands = extractLocalBodyIntent(typedText);
   if (!commands.length) {
-    return;
+    return [];
   }
-  lastBodyGoalName = commands[0].name === "stop" ? null : commands[0].name;
   const nearbyNames = Object.values(bot.players || {})
     .map((player) => player?.username)
     .filter((name) => name && name !== configuration.minecraftUsername);
@@ -478,18 +615,12 @@ async function runLocalBodyIntent(typedText) {
     "Body players in range:",
     nearbyNames.join(", ") || "none"
   );
-  const results = await executePlayCommands(bot, commands, {
-    onCommand: (command) => {
-      console.log("Running", command.name, command.arguments);
-    },
+  // Started, not awaited: a job such as gathering wood runs for many seconds
+  // and the avatar's reply must not wait behind the job.
+  runBodyCommands(commands).catch((error) => {
+    console.warn("Local body intent failed:", error.message);
   });
-  const failed = results.filter((result) => result.status === "failed");
-  if (failed.length) {
-    console.warn(
-      "Skill failures:",
-      failed.map((result) => `${result.command.name}: ${result.errorMessage}`).join("; ")
-    );
-  }
+  return commands;
 }
 
 async function postMessageTurnOrRetry(kind, startTurn, signal) {
@@ -553,6 +684,7 @@ async function handleSpokenUtterance(utteranceBytes, senderName) {
       "Neural Nexus spoken reply:",
       stripLeakedSystemPrompt(turn.content || "").slice(0, 160)
     );
+    let alreadyRunCommands = [];
     if (turn.spokenTurnText) {
       const heardSpeech = stripLeakedSystemPrompt(turn.spokenTurnText);
       console.log("Heard:", heardSpeech.slice(0, 120));
@@ -561,9 +693,9 @@ async function handleSpokenUtterance(utteranceBytes, senderName) {
         await sayCapabilityHelp();
         return;
       }
-      await runLocalBodyIntent(turn.spokenTurnText);
+      alreadyRunCommands = await runLocalBodyIntent(turn.spokenTurnText);
     }
-    await handleReply(turn);
+    await handleReply(turn, { alreadyRunCommands });
   });
 }
 
@@ -608,16 +740,25 @@ async function sendAmbientLook() {
   }
 }
 
+// Autonomy fills idle time and never overrides the player: a stop or "wait
+// here" holds the body until the player asks for movement again, and a
+// running job (gathering, digging) is never replaced by a walk.
 async function runAmbientBodyAutonomy() {
-  if (playerTurnIsInFlight()) {
+  if (playerTurnIsInFlight() || !autonomyMayMoveBody(bodyGoalState)) {
     return;
   }
-  if (lastBodyGoalName === "follow") {
+  if (bodyGoalState.goalName === "follow") {
     if (bot.pathfinder?.goal) {
       return;
     }
     console.log("Ambient autonomy: continue follow");
     await runLocalBodyIntent("follow me");
+    return;
+  }
+  // Only a body with no standing goal wanders over to a player. A body the
+  // player gave a job to, or that finished a job, stays where the job left
+  // the body.
+  if (bodyGoalState.goalName) {
     return;
   }
   const nearby = firstOtherPlayer(bot);
@@ -628,6 +769,113 @@ async function runAmbientBodyAutonomy() {
       await runLocalBodyIntent("come here");
     }
   }
+}
+
+// What only the companion holds, reachable from a skill runner: the chat
+// mute, the Neural Nexus thread, the hold, the standing goal, and the modes.
+function installCompanionHooks() {
+  bot.nexusHooks = {
+    setQuiet: (quiet) => {
+      unpromptedSpeechMuted = Boolean(quiet);
+      if (quiet) {
+        setStandingGoal(null);
+      }
+    },
+    clearChat: () => {
+      configuration.threadId = null;
+    },
+    holdFor: (seconds) => {
+      recordBodyCommands(bodyGoalState, [{ name: "stop", arguments: [] }]);
+      if (holdReleaseTimer) {
+        clearTimeout(holdReleaseTimer);
+        holdReleaseTimer = null;
+      }
+      if (Number(seconds) >= 0) {
+        holdReleaseTimer = setTimeout(() => {
+          holdReleaseTimer = null;
+          bodyGoalState.held = false;
+        }, Number(seconds) * 1000);
+      }
+    },
+    setGoal: (goalText) => setStandingGoal(goalText),
+    setMode: (modeName, enabled) => setModeInState(modeState, modeName, enabled),
+    modeIsOn: (modeName) => Boolean(modeState[modeName]),
+    describeModes: () => describeModeState(modeState),
+  };
+}
+
+function setStandingGoal(goalText) {
+  standingGoal = goalText ? String(goalText) : null;
+  standingGoalTurns = 0;
+  console.log(standingGoal ? `Standing goal: ${standingGoal}` : "Standing goal ended");
+}
+
+// A "!" line runs on the body at once, like a Mindcraft command: no Neural
+// Nexus turn, no look, and the result or the failure is posted in chat.
+async function runTypedCommand(speakerName, typedCommand) {
+  if (!playerMayTypeCommands(speakerName, configuration.directCommandPlayers)) {
+    console.log("Typed command refused for", speakerName, typedCommand.name);
+    return;
+  }
+  console.log("Typed command from", speakerName, `!${typedCommand.name}`, typedCommand.arguments);
+  if (typedCommand.name.toLowerCase() === "help") {
+    for (const line of typedCommandHelpLines()) {
+      sayInGameChat(line);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    return;
+  }
+  if (!typedCommand.known) {
+    sayInGameChat(`I don't know !${typedCommand.name}. Type !help for the list.`);
+    return;
+  }
+  const results = await runBodyCommands([
+    { name: typedCommand.name, arguments: typedCommand.arguments },
+  ]);
+  const output = results.find((result) => result.status === "ok")?.output;
+  if (output) {
+    for (const line of wrapSpokenChatLines(output)) {
+      sayInGameChat(line);
+    }
+  }
+}
+
+// One self-prompted turn toward the standing goal, when nothing else is
+// happening: no player turn, no running job, and the body not held still.
+async function advanceStandingGoal() {
+  if (
+    !standingGoal ||
+    unpromptedSpeechMuted ||
+    playerTurnIsInFlight() ||
+    ambientLookInFlight ||
+    bodyGoalState.jobsInFlight > 0 ||
+    bodyGoalState.held
+  ) {
+    return;
+  }
+  if (standingGoalTurns >= MAXIMUM_GOAL_TURNS) {
+    sayInGameChat(`Pausing the goal after ${MAXIMUM_GOAL_TURNS} steps. Type !goal again to keep going.`);
+    setStandingGoal(null);
+    return;
+  }
+  standingGoalTurns += 1;
+  const goalText = standingGoal;
+  acceptUserTurn("goal", async (signal) => {
+    refreshMinecraftWorldSnapshot();
+    console.log(`Goal step ${standingGoalTurns}: ${goalText}`);
+    const turn = await answerLookNowPauses(
+      await postIdlePlayTurn(configuration, {
+        playPromptMessage:
+          `(Standing goal, step ${standingGoalTurns}) Keep working toward this goal: ${goalText}. ` +
+          "Choose the next commands from what MINECRAFT_WORLD shows and call act_in_minecraft. " +
+          "When the goal is complete, call act_in_minecraft with endGoal. Keep any spoken words to one short sentence.",
+        signal,
+        onFrame: rememberStreamingFrame,
+      }),
+      signal
+    );
+    await handleReply(turn, { speakAloud: false });
+  });
 }
 
 async function sendIdlePlayTurn() {

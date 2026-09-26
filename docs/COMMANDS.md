@@ -1,292 +1,305 @@
-# Neural Nexus Minecraft companion — usage
+# Companion command testing checklist
 
-A companion is a **Minecraft Java / Fabric 1.21.1 body** for one Neural Nexus avatar. Anubis still owns identity, memory, and cloned voice. The body walks, looks, chats, and runs a **closed skill list**. Invented skill names are ignored.
+Every command the NeuralNexus companion understands, with an example to type and what to expect. Tick each box as you test.
 
-You almost never type `!follow()` yourself. You talk to the avatar; Anubis may emit a latent `!` line after the spoken reply. This document lists every player-facing phrase, every latent skill, and every host command that matters.
-
-Related: `docs/KID.md` (join the world), `docs/HOST.md` (run Fabric), `README.md` (environment).
-
----
-
-## 1. Talk to the avatar (player)
-
-Press **T**. Mention the offline username (default `NeuralNexus`). That line is the Neural Nexus message box.
-
-```
-@NeuralNexus hey isn't this cool?
-@NeuralNexus where do you work?
-@NeuralNexus describe yourself please
-@NeuralNexus follow me
-@NeuralNexus stop following
-@NeuralNexus what do you see?
-@NeuralNexus help
-@NeuralNexus what can you do?
-```
-
-| You type | What happens |
-|---|---|
-| `@NeuralNexus <sentence>` | Sent to `POST /message/{assistant_id}` as your words. Reply appears in chat and as cloned `/speak` audio. |
-| `@neuralnexus, <sentence>` | Same mention (comma optional, case-insensitive). |
-| `/msg NeuralNexus <sentence>` | Whisper counts as a mention. |
-| `@NeuralNexus help`, `@NeuralNexus commands`, `@NeuralNexus ?`, or **what can you do?** | Lists what the body can do in plain speech. No API call. |
-| `@NeuralNexus` alone | Same help list. |
-| Chat without `@NeuralNexus` | Ignored, except follow/stop phrases and **what can you do?** |
-| `/tp`, `/gamemode`, other `/` lines | Vanilla **server** commands. The avatar does not read them. |
-
-Plain chat is not a DM. Mentions are required so the body does not treat every nearby sentence as Neural Nexus mail.
-
-Typed chat and push-to-talk both queue. One does not cancel the other. Anubis still runs **one** `/message` at a time; the next waits.
-
-After changing `ASSISTANT_ID` in `.env`, recreate the companion (do not `docker compose restart`):
+Watch the companion's log while testing:
 
 ```bash
-docker compose up -d --force-recreate --no-deps companion
+docker compose logs -f companion | grep -v "Companion position"
 ```
 
-The join log must show `Neural Nexus avatar` plus the new id fingerprint.
+## How to talk to the buddy
 
----
+The buddy takes commands three ways:
 
-## 2. Voice (player)
+| Way | Example | Goes to Neural Nexus? | Log line to look for |
+|---|---|---|---|
+| **Typed `!` command** | `!collectBlocks(oak_log, 10)` | No. Runs on the buddy at once and posts the result in chat. | `Typed command from <you> !collectBlocks [...]` then `Running collectBlocks [...]` |
+| **Plain phrase (fast path)** | `gather wood` | Yes, but the buddy starts before the reply arrives. | `Local body intent collectBlocks` |
+| **Anything else** | `@NeuralNexus build me a dirt hut here` | Yes. The avatar chooses commands through `act_in_minecraft`. | `Avatar act: ...` then `Running ...` |
 
-| Action | Result |
+Rules for typed `!` commands:
+
+- **Two ways to write arguments.** In parentheses: `!goToCoordinates(100, 64, -20)`. Or separated by spaces: `!goToCoordinates 100 64 -20`.
+- **Quote a phrase** to keep it as one argument: `!goal "build a small house"`.
+- **Names are not case-sensitive.** `!STOP` works like `!stop`.
+- **No `@NeuralNexus` needed.** A `!` line needs no mention, and `@NeuralNexus !stop` also works.
+- **Who may type them:** if `DIRECT_COMMAND_PLAYERS` is set in `.env`, only those players can. If it is empty, every player can.
+- **Unknown names** are answered with `I don't know !<name>. Type !help for the list.`
+- **Failures** are posted in chat as `Couldn't finish: <reason>`.
+
+## Natural language equivalents
+
+Almost every `!` command can also be asked for in plain language:
+
+- **Instant phrases.** A fixed set runs on the buddy right away, without waiting for the avatar, and works exactly every time.
+- **Everything else goes to the avatar.** Say it with `@NeuralNexus …`, in a whisper, or out loud. The avatar reads the request and sends the matching command through `act_in_minecraft`. Any wording works, but the avatar interprets it, so a vague request can come out differently.
+
+Typed chat without a mention, a `!`, or one of the instant phrases is ignored. "make some planks" alone does nothing; "@NeuralNexus make some planks" works.
+
+### Instant phrases (no `@NeuralNexus` needed when typed)
+
+| Command | Say |
 |---|---|
-| Hold **Push to Talk**, speak one sentence, release | Audio goes to `/message` with `diarize=true` and `voice_mode=true`. Spoken jobs such as “follow me”, “stop”, and “look at me” should emit the same body skills as typed chat. |
-| Live voice / voice activation | Same path, but only if Simple Voice Chat names **another player** on the packet and the PCM crosses a speech level (about 0.5 s, non-silent). Quiet leftovers are logged as `Ignoring quiet voice from …` and are not sent. |
-| **V** | Opens the Simple Voice Chat **menu**. That key is not transmit. Bind Push to Talk separately. |
-| On-screen mic / speaker icons | Simple Voice Chat HUD. **V** → settings → enable on-screen icons. Neural Nexus does not draw a live waveform in Minecraft. |
+| `follow` | follow me, c'mon NeuralNexus, come on, come here, come with me, this way, over here, keep up, stay with me |
+| `stop` (and hold) | stop, stay, wait, freeze, wait here, stay here, stay put, stop following, hold up, hold on, stand still, don't move, don't follow |
+| `lookAt player` | look at me, look here |
+| `collectBlocks log 8` | gather, gather wood, chop some trees, collect logs, get wood, grab some logs, GatherWoods |
+| `collectBlocks <block> 4` | dig (dirt), dig sand, mine stone, mine iron, mine coal, dig gravel, mine diamonds |
+| `giveCollected` | give me what you collected, hand over everything, give me your stuff, toss me your loot |
 
-There is no duplex “live Neural Nexus call.” One utterance becomes one queued turn, then cloned playback through Simple Voice Chat. Each spoken sentence is posted in chat as that sentence’s audio starts.
+### Through the avatar (examples; any wording that means the same should work)
 
-Use **Simple Voice Chat Fabric 1.21.1-2.5.28** (protocol 18). Version 2.6.x will not join the companion.
+| Command | Example request |
+|---|---|
+| `goToPlayer` | "come to me", "go over to Steve" |
+| `followPlayer` | "follow Steve", "stay a few blocks behind me" |
+| `goToCoordinates` / `goto` | "go to 100 64 -20" |
+| `searchForBlock` | "find a crafting table", "go look for iron ore" |
+| `searchForEntity` | "find a cow", "go to the nearest villager" |
+| `moveAway` | "back off", "move away from here" |
+| `goToSurface` | "get out of this cave", "go up to the surface" |
+| `digDown` | "dig straight down five blocks" |
+| `stay` | "wait here for a minute", "don't move until I say so" |
+| `rememberHere` | "remember this spot as base" |
+| `goToRememberedPlace` | "go back to base" |
+| `lookAtPlayer` / `lookAtPosition` | "look at Steve", "look where I'm looking", "look at 100 64 -20" |
+| `collectBlocks` / `mineBlock` | "get me 20 birch logs", "mine one block of stone" |
+| `placeBlock` / `placeHere` | "put a dirt block next to you", "place a torch at 100 64 -20" |
+| `craftRecipe` | "make some planks", "craft a wooden pickaxe" |
+| `smeltItem` | "smelt the raw iron" |
+| `clearFurnace` | "empty the furnace" |
+| `equip` | "hold your sword" |
+| `eat` / `consume` | "eat something", "eat the bread" |
+| `givePlayer` | "give me 5 logs", "give Steve your pickaxe" |
+| `toss` / `discard` | "drop the dirt", "throw away 10 cobblestone" |
+| `putInChest` / `takeFromChest` / `viewChest` | "put the logs in the chest", "take the iron out", "what's in the chest?" |
+| `attack` | "kill that zombie", "fight the skeleton", "go hunt a cow" |
+| `attackPlayer` | "fight Steve" (only in a game fight) |
+| `goToBed` / `sleep` | "go to sleep", "go to bed" |
+| `jump` / `sneak` | "jump", "crouch" |
+| `useOn` | "shear the sheep", "flip that lever", "use the bucket" |
+| `showVillagerTrades` / `tradeWithVillager` | "what does the villager sell?", "buy the emerald trade" |
+| `goal` / `endGoal` | "build a small house" (a long job worked on over several turns), "you can stop working on that" |
+| `setMode` | "stop picking things up on your own", "start hunting when you're idle" |
+| `say_chat` | "say hello to everyone in chat" |
+| `startConversation` | "tell Steve we should trade" |
 
----
+### Typed only (no plain-language equivalent)
 
-## 3. How latent body commands work
-
-Anubis answers **as the person**. After the spoken words, Anubis may emit zero or more lines from the closed list below. The companion strips those lines from chat, then runs them.
-
-Rules the body prompt uses:
-
-- Ordinary questions get **zero** commands (`where do you work?` should not start `!follow`).
-- Movement and gathering run only when you asked the body to act (`follow me`, `get some oak`, `come here`).
-- Commands are never read aloud.
-- Invented names such as `!explodeTheWorld` are dropped.
-
-Accepted shapes (Anubis emits these; you do not need to):
-
-```
-On my way.
-!follow()
-!collectBlocks('oak_log', 8)
-```
-
-```
-Sure.
-```minecraft-actions
-{"actions":[{"name":"follow","target":"player"}]}
-```
-```
-
-Player names default to the nearest other player when the argument is omitted or is `player`.
-
-Block and item names are **Minecraft registry ids**: `oak_log`, `cobblestone`, `wooden_pickaxe`. Not “oak wood.”
-
----
-
-## 4. Closed skill list
-
-### Movement and attention
-
-| Latent command | Arguments | What the body does | Example things you say |
-|---|---|---|---|
-| `!goToPlayer(name, range)` | `name` optional; `range` default `2` | Pathfind and stay near that player. | `@NeuralNexus come here` / `@NeuralNexus walk over to UncleEvan1337` |
-| `!follow(name)` | `name` optional | Persistent follow at range 2. | `@NeuralNexus follow me` |
-| `!goto(x, y, z)` | Block coordinates | Walk to that position (within 1 block). | `@NeuralNexus go to 100 64 -20` |
-| `!stop()` | none | Clear the pathfinder goal and movement keys. | `@NeuralNexus stop` / `@NeuralNexus stop following` |
-| `!lookAt(name)` | `name` optional | Face that player’s head. | `@NeuralNexus look at me` |
-
-`follow` and `goToPlayer` start a persistent pathfinder goal and return immediately. `goto` waits until the body is near the coordinate.
-
-### Gathering and building
-
-| Latent command | Arguments | What the body does | Example things you say |
-|---|---|---|---|
-| `!collectBlocks(block, count)` | `block` registry name; `count` default `1` | Find that block within 64, walk, dig, repeat. | `@NeuralNexus get 8 oak logs` |
-| `!mineBlock(block)` | `block` | Same as `collectBlocks` with count 1. | `@NeuralNexus mine that cobblestone` |
-| `!placeBlock(block, x, y, z)` | Inventory item + integer coordinates | Walk near the spot, place against a solid face. | `@NeuralNexus put cobblestone at 23 80 -130` |
-
-`collectBlocks` stops early if no matching block is left in range. `placeBlock` fails if the item is not in inventory or there is no solid neighbor face.
-
-### Crafting and furnace
-
-| Latent command | Arguments | What the body does | Limits |
-|---|---|---|---|
-| `!craftRecipe(item, count)` | `item` registry name; `count` default `1` | Craft from the **2×2 inventory grid**. | No crafting table. No 3×3 recipes (no chest, no pickaxe from a table). Sticks, planks, and other 2×2 recipes work if ingredients are in inventory. |
-| `!smelt(item)` | `item` or ore name | Walk to a furnace, blast furnace, or smoker within 32; put one input and one fuel; wait up to 30 s; take output. | Needs the item (or `*_ore` / `*_item`) and fuel: `coal`, `charcoal`, `coal_block`, `oak_planks`, or `stick`. |
-
-Examples: `@NeuralNexus craft some sticks` → `!craftRecipe('stick', 4)`. `@NeuralNexus smelt that iron` → `!smelt('iron')` or `!smelt('raw_iron')`.
-
-### Inventory and use
-
-| Latent command | Arguments | What the body does | Example things you say |
-|---|---|---|---|
-| `!equip(item)` | registry name | Put that inventory item in the hand. | `@NeuralNexus hold your pickaxe` |
-| `!toss(item, count)` | `item`; `count` default `1` | Drop that many from inventory. | `@NeuralNexus drop me a log` |
-| `!useOn(name)` | player name optional | Look at the player and right-click the held item. | `@NeuralNexus use that on me` |
-| `!eat()` | none | Equip food that restores hunger and consume it. | `@NeuralNexus eat something` |
-
-### Combat and body
-
-| Latent command | Arguments | What the body does | Limits |
-|---|---|---|---|
-| `!attack(name)` | entity username, `name`, or display name | **One** melee hit. | Not a fight loop. No kiting, no bow AI. |
-| `!sleep()` | none | Sleep in a bed within 8 blocks. | Fails if no bed or it is not night / storm. |
-| `!jump()` | none | Jump for 200 ms. | Gesture only. |
-| `!sneak()` | none | Sneak for 400 ms. | Gesture only. |
-| `!say_chat(text)` | string | Extra public chat line (on top of the Neural Nexus reply). | Keep short; Minecraft chat is ~256 characters. |
+- **`!restart` and `!clearChat`** are kept off the avatar's list on purpose: only a player can restart the buddy or reset its conversation.
+- **Queries** (`!stats`, `!inventory`, `!nearbyBlocks`, `!entities`, `!craftable`, `!savedPlaces`, `!modes`, `!getCraftingPlan`, `!searchWiki`) have no command the avatar can send, because their answers only go to chat and the avatar could not read them. "where are you?", "what are you carrying?" and "who's near you?" still work: the avatar answers from the world snapshot sent with every turn. A crafting plan or the list of modes is only available as a `!` command.
+- **`!newAction`** is not offered at all.
 
 ---
 
-## 5. What to say for common jobs
+**Test setup:** stand 5 to 10 blocks from the buddy in a spot with trees, dirt and stone nearby. Some sections need a chest, a furnace, a crafting table, a bed or a villager; set those up before reaching them.
 
-| Goal | Say this | Latent command you should see in logs |
+---
+
+## 1. Help
+
+| ✓ | Type | Expect |
 |---|---|---|
-| Identity / small talk | `@NeuralNexus where do you work?` | none |
-| Walk with you | `@NeuralNexus follow me`, **c'mon NeuralNexus**, **come on**, **this way**, **over here**, or say those on push-to-talk | `Local body intent follow` then `Running follow []` |
-| Stop | `@NeuralNexus stop`, **stay there**, **stay put**, **hold up** | `Local body intent stop` then `Running stop []` |
-| Face you | `@NeuralNexus look at me` | `Running lookAt ['player']` |
-| Walk to coordinates | `@NeuralNexus go to 100, 64, -20` | `Running goto [100, 64, -20]` |
-| Gather | `@NeuralNexus collect 8 oak logs` | `Running collectBlocks ['oak_log', 8]` |
-| Place | `@NeuralNexus place oak_planks at 10 71 -129` | `Running placeBlock ['oak_planks', 10, 71, -129]` |
-| Craft (2×2) | `@NeuralNexus craft sticks` | `Running craftRecipe ['stick', …]` |
-| Smelt | `@NeuralNexus smelt iron in that furnace` | `Running smelt ['iron']` |
-| Give items | `@NeuralNexus toss me 2 oak_log` | `Running toss ['oak_log', 2]` |
-| Eat / sleep | `@NeuralNexus eat` / `@NeuralNexus sleep` | `Running eat []` / `Running sleep []` |
+| ☐ | `!help` | Chat lists every `!` command name, then an example line. |
+| ☐ | `@NeuralNexus help` | The plain-language capability help (seven lines). |
+| ☐ | `what can you do` | The same capability help. |
+| ☐ | `!bogus` | `I don't know !bogus. Type !help for the list.` |
 
-Follow live companion logs (Docker hides output unless you follow):
+## 2. Plain phrases (fast path, no `!`)
 
-```bash
-docker compose logs -f companion
-```
+These start the buddy instantly. The avatar also replies, and if the avatar sends the same command again, it is not run twice.
 
-Chat without `@NeuralNexus` logs as `Chat ignored (need @mention):`. Voice logs `Simple Voice Chat connected`, `Voice started from UncleEvan1337`, or `Voice packet ignored`.
+| ✓ | Say or type | Command that runs | Expect |
+|---|---|---|---|
+| ☐ | `follow me` / `c'mon NeuralNexus` / `come here` / `this way` / `keep up` / `stay with me` | `follow` | Body walks after you and keeps following. |
+| ☐ | `stop following` / `stop followin` / `wait here` / `stay put` / `hold up` / `stand still` / `stop` / `stay` | `stop` | Body stops and **holds**: it does not wander back to you until you say follow. |
+| ☐ | `look at me` / `look here` | `lookAt player` | Body turns to face you. **No `look_now` line in the log.** |
+| ☐ | `gather wood` / `GatherWoods` / `gather` / `chop some trees` / `get wood` / `can you gather wood` | `collectBlocks log 8` | Body chops the nearest tree of any kind and picks up the logs. |
+| ☐ | `dig` | `collectBlocks dirt 4` | Body digs 4 dirt and picks up the drops. |
+| ☐ | `mine stone` / `mine iron` / `dig sand` / `mine coal` | `collectBlocks <block> 4` | Body mines that block. Iron also matches deepslate iron ore. |
+| ☐ | `give me what you collected` / `hand over everything` / `give me your stuff` | `giveCollected player` | Body walks to you and tosses every stack it carries. |
+| ☐ | `did you get wood yesterday?` / `dig a tunnel` | nothing | No `Local body intent` line; left to the avatar. |
 
-Companion logs:
+## 3. Control
 
-```
-Typed chat from UncleEvan1337 where do you work?
-Neural Nexus typed reply: I work on Neuralink.
-```
-
-A question should **not** be followed by `Running follow` or `Running collectBlocks`. If it is, the body treated a question as a job.
-
----
-
-## 6. Senses and background loops (not typed)
-
-| Loop | Interval (defaults) | What the companion sends |
+| ✓ | Type | Expect |
 |---|---|---|
-| Ambient look | `AMBIENT_CAPTURE_INTERVAL_SECONDS` = 30, `-1` to disable | One first-person JPEG per look, attached once as the `screen` source. Anubis may speak and/or emit autonomous `!` skills from what the first-person JPEG shows. |
-| Look on demand (`look_now`) | not a loop — Anubis decides | Attached on every turn that reports `minecraft_body`, so Anubis calls `look_now` when what is in the world decides the answer or the next action. At most 2 looks per turn (`MAXIMUM_LOOKS_PER_TURN`). Asking **what do you see?** takes one. With ambient capture at `-1`, `look_now` is the only way Anubis sees the world. |
-| Idle play | `IDLE_PLAY_INTERVAL_SECONDS` = 45 | Latent body only. Prefer silence. May continue an obvious current job. |
-| World snapshot | every user / idle turn | Position, yaw/pitch, dimension, biome, time, health, food, held item, inventory, nearby players, nearby block names. |
+| ☐ | `!stop` | Stops all movement and any running job (a dig in progress ends quietly, with no failure message). Body holds. |
+| ☐ | `!stay(20)` | `Staying here for 20 seconds.` Body holds, then may move again after 20 s. |
+| ☐ | `!stay(-1)` | `Staying here until told otherwise.` |
+| ☐ | `!clearChat` | `Started a fresh conversation.` The next Neural Nexus turn starts a new thread. |
+| ☐ | `!restart` | `Restarting; back in a few seconds.` Body leaves and rejoins about 5 s later. |
 
-Ambient and idle **skip** while a typed or spoken turn is queued or running.
+## 4. Movement
 
----
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | `!goToPlayer(UncleEvan1337)` | Walks to within 3 blocks of you, once. `Reached UncleEvan1337.` |
+| ☐ | `!goToPlayer(UncleEvan1337, 1)` | Walks to within 1 block. |
+| ☐ | `!followPlayer(UncleEvan1337, 4)` | Follows you at about 4 blocks. `Following UncleEvan1337.` |
+| ☐ | `!follow` | Follows the nearest player. |
+| ☐ | `!goToCoordinates(<x>, <y>, <z>)` | Walks there. `Arrived near x, y, z.` Take coordinates from F3. |
+| ☐ | `!goto <x> <y> <z>` | Same as above, with space-separated arguments. |
+| ☐ | `!searchForBlock(crafting_table, 32)` | Walks to the nearest crafting table, or says none is within 32. |
+| ☐ | `!searchForEntity(cow)` | Walks to the nearest cow. |
+| ☐ | `!moveAway(8)` | Moves 8 blocks away from where the buddy stands. |
+| ☐ | `!goToSurface` | From a cave or a hole: climbs to the top block. |
+| ☐ | `!digDown(3)` | Digs 3 blocks straight down; stops early above lava or water. |
 
-## 7. Host and Docker commands
+## 5. Places
 
-Run from `minecraft-integration/`. Anubis is **not** in this compose file.
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | `!rememberHere(base)` | `Remembered this spot as base.` |
+| ☐ | Walk away, then `!goToRememberedPlace(base)` | Body walks back. `Back at base.` |
+| ☐ | `!savedPlaces` | Lists `base at x, y, z`. Saved places survive a reconnect, not a container rebuild. |
 
-```bash
-# First start (Fabric + companion)
-docker compose up --build
+## 6. Looking
 
-# After editing companion source
-docker compose up --build -d --no-deps companion
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | `!lookAt(player)` | Faces the nearest player. |
+| ☐ | `!lookAtPlayer(UncleEvan1337)` | Faces you. |
+| ☐ | `!lookAtPlayer(UncleEvan1337, with)` | Looks the same direction you are looking. |
+| ☐ | `!lookAtPosition(<x>, <y>, <z>)` | Faces that block. |
 
-# After editing .env (ASSISTANT_ID, API_KEY, API URL)
-docker compose up -d --force-recreate --no-deps companion
+## 7. Gathering and building
 
-# Do not use this to pick up .env changes
-docker compose restart companion
-```
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | `!collectBlocks(oak_log, 5)` | Chops 5 oak logs and picks them up. Near-miss names fall back to any log (dark oak forest). |
+| ☐ | `!collectBlocks(log, 5)` | `log`, `wood` or `tree` means any log type. |
+| ☐ | `!collectBlocks(dirt, 3)` | Digs 3 dirt. |
+| ☐ | `!collectBlocks(unobtainium, 1)` | Fails with `Unknown block unobtainium.` |
+| ☐ | `!mineBlock(stone)` | Mines one stone. |
+| ☐ | `!placeHere(dirt)` | Places one dirt beside the buddy (needs dirt in inventory). |
+| ☐ | `!placeBlock(dirt)` | Same as above: with no coordinates it places beside the buddy. |
+| ☐ | `!placeBlock(dirt, <x>, <y>, <z>)` | Places at that spot; fails if no solid face is next to it. |
+| ☐ | Carry only birch logs, then `!placeBlock(birch_planks)` | Crafts planks from the logs first, then places one. |
 
-`restart` keeps the old container environment. Recreate. Confirm:
+## 8. Crafting and smelting
 
-```
-Joined fabric-server:25565 as NeuralNexus
-Neural Nexus avatar ddc68489…e1545c
-```
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | `!craftRecipe(oak_planks, 1)` | `Crafted oak_planks.` (2×2 grid, needs a log.) |
+| ☐ | `!craftRecipe(crafting_table, 1)` | Crafts a table from 4 planks. |
+| ☐ | `!craftRecipe(wooden_pickaxe, 1)` | Needs the 3×3 grid: walks to a crafting table within 32 blocks, then crafts. Without one: `Cannot craft ... (no crafting table nearby)`. |
+| ☐ | `!getCraftingPlan(wooden_pickaxe, 1)` | Lists ingredients with how many the buddy has, and whether a table is needed. |
+| ☐ | `!craftable` | Lists what can be crafted right now. |
+| ☐ | `!smeltItem(raw_iron, 2)` | Walks to a furnace, adds fuel (coal, charcoal, planks or logs), and smelts 2. |
+| ☐ | `!smelt(raw_iron)` | Older single-item smelt. |
+| ☐ | `!clearFurnace` | Takes the input, fuel and output out of the nearest furnace. |
 
-Without Docker:
+## 9. Items
 
-```bash
-npm install
-npm test
-npm start
-```
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | `!inventory` | `Holding <item>. Inventory: <counts>.` |
+| ☐ | `!equip(wooden_pickaxe)` | Holds the pickaxe. |
+| ☐ | `!eat` | Eats any food it carries. |
+| ☐ | `!consume(bread)` | Eats that specific item. |
+| ☐ | `!givePlayer(UncleEvan1337, oak_log, 3)` | Walks to you and tosses 3 logs. |
+| ☐ | `!giveCollected(UncleEvan1337)` | Walks to you and tosses everything it carries. |
+| ☐ | `!toss(dirt, 2)` | Drops 2 dirt where it stands. |
+| ☐ | `!discard(dirt)` | Drops all its dirt (`-1` or no count means all). |
 
-Do **not** run `npm audit fix --force` (downgrades Mineflayer to 1.x).
+## 10. Chests (place a chest within 32 blocks first)
 
-Useful in-game **server** commands (you must be op; `ops.json` loads on Fabric start):
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | `!putInChest(dirt, 2)` | Walks to the chest and stores 2 dirt. |
+| ☐ | `!viewChest` | `Chest holds: ...` |
+| ☐ | `!takeFromChest(dirt)` | Takes all the dirt back. |
 
-```
-/tp NeuralNexus
-/tp UncleEvan1337 NeuralNexus
-```
+## 11. Combat
 
-`docker attach` does not send console commands unless compose has stdin/tty.
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | `!attack(zombie)` / `!attack(cow)` | Equips its best sword or axe and fights the nearest one within 24 blocks until the mob is gone. `Defeated the zombie.` |
+| ☐ | `!stop` during a fight | The fight ends. |
+| ☐ | `!attackPlayer(<friend>)` | Fights that player (test with a willing friend, on a server where PvP is on). |
 
----
+## 12. Life, use and villagers
 
-## 8. Environment that changes behavior
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | At night, `!goToBed` or `!sleep` | Walks to a bed within 32 blocks and sleeps. |
+| ☐ | `!jump` / `!sneak` | A short jump or a crouch. |
+| ☐ | `!useOn(shears, sheep)` | Walks to a sheep and shears it. |
+| ☐ | `!useOn(hand, lever)` | Flips the nearest lever. |
+| ☐ | `!useOn(bucket, nothing)` | Uses the held bucket. |
+| ☐ | `!entities` | Lists nearby entities with their ids. Use the id below. |
+| ☐ | `!showVillagerTrades(<id>)` | Lists trades as `0: 20 wheat -> 1 emerald; ...`. |
+| ☐ | `!tradeWithVillager(<id>, 0, 1)` | Makes trade 0 once (needs the input items). |
 
-Required in `.env`: `NEURAL_NEXUS_API_BASE_URL`, `API_KEY`, `ASSISTANT_ID`.
+## 13. Queries (typed only; the answer is posted in chat)
 
-| Variable | Role |
-|---|---|
-| `ASSISTANT_ID` | Which Neural Nexus avatar the body is. |
-| `MINECRAFT_USERNAME` | Offline name players mention (`@NeuralNexus`). |
-| `MINECRAFT_SERVER_HOST` | Companion → Fabric. Compose forces `fabric-server`. |
-| `VOICE_PLAYBACK` | `auto` = SVC `sendAudio` (else host `ffplay`). `off` = chat and skills only. |
-| `VOICE_HOST` | Address **players** use for SVC UDP (VPN / public IP). Never `fabric-server`. |
-| `USER_TIMEZONE` | Sent as `user_timezone` on `/message`. |
-| `AMBIENT_CAPTURE_INTERVAL_SECONDS` | Ambient look period in seconds. `-1` disables ambient capture completely; the avatar then sees only on demand. A value below `1` is rejected at startup, because a zero period made the companion send ambient looks back to back. |
-| `IDLE_PLAY_INTERVAL_SECONDS` | Idle body period. |
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | `!stats` | Position, dimension, health, hunger and time of day. |
+| ☐ | `!inventory` | What it is holding and carrying. |
+| ☐ | `!nearbyBlocks` | Block types within 16 blocks. |
+| ☐ | `!entities` | Players, mobs and animals within 24 blocks. |
+| ☐ | `!craftable` | Items it can craft now. |
+| ☐ | `!savedPlaces` | Places saved with `!rememberHere`. |
+| ☐ | `!modes` | Every mode, ON or off, with its description. |
+| ☐ | `!getCraftingPlan(stick, 4)` | The ingredients needed for 4 sticks. |
+| ☐ | `!searchWiki(creeper)` | Says wiki search is not available on this buddy. |
 
----
+## 14. Autonomy: goals and modes
 
-## 9. Hard limits (not in the skill list)
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | `!goal "collect 10 oak logs and craft planks"` | `Working toward: ...`. Every ~8 s while idle the log shows `Goal step N:` and the avatar picks the next commands. It stops after the avatar sends `endGoal`, or after 30 steps. |
+| ☐ | `!endGoal` | `Goal ended.` No more goal steps. |
+| ☐ | `!setMode(hunting, true)` | `Mode hunting is on.` While idle, the buddy hunts nearby animals. |
+| ☐ | `!setMode(hunting, off)` | Turns it back off. |
+| ☐ | `!setMode(flying, true)` | Fails with `No mode named flying. Try !modes.` |
 
-The body **cannot**:
+Modes, and whether each starts on:
 
-- Run arbitrary JavaScript or Mindcraft `!newAction`
-- Open chests, trade, fish, boat, fly, farm in a loop, use redstone, enchant, or brew
-- Use a crafting table (3×3)
-- Sustain combat, bow AI, or “build a house from a description”
-- See a real framebuffer (raycast JPEG + block names only)
-- Join Bedrock, Microsoft Store, or Simple Voice Chat 2.6.x
-- Serve as a second API (if Anubis is down, the body is mute)
+| Mode | Default | What to check |
+|---|---|---|
+| `self_preservation` | ON | Jumps out of water and lava; eats at 3 hearts or less if it carries food. |
+| `unstuck` | ON | Jumps when a walk has not moved for 10 s. |
+| `self_defense` | ON | Hits hostile mobs within 4 blocks, even while holding still. |
+| `item_collecting` | ON | While idle and not held: walks over nearby drops. |
+| `idle_staring` | ON | While idle: turns its head to nearby players and animals. |
+| `cowardice` | off | Runs from enemies at under 5 hearts. |
+| `hunting` | off | While idle: hunts cows, pigs, chickens, sheep, rabbits. |
+| `torch_placing` | off | While idle, with torches and none nearby: places one. |
+| `elbow_room` | off | While idle: steps away from a player standing on it. |
+| `cheat` | off | Uses `/tp` instead of walking (the buddy must be an operator). |
 
-One companion process = one avatar = one Mineflayer player. Several people can join the same world; they all talk to that one body.
+## 15. Talking to other players and bots
 
----
+| ✓ | Type | Expect |
+|---|---|---|
+| ☐ | `!say_chat(hello everyone)` | The buddy says `hello everyone` in chat. |
+| ☐ | `!startConversation(<player>, "want to trade?")` | Whispers the message to that player. |
+| ☐ | `!endConversation(<player>)` | Confirms the conversation ended. |
+| ☐ | `!newAction(anything)` | Refused: runs model-written code and is not offered. |
 
-## 10. Quick card
+## 16. Asking the avatar in plain language
 
-```
-Talk:     T → @NeuralNexus <words>
-Help:     what can you do?  or  @NeuralNexus help
-Voice:    hold Push to Talk (not V)
-Stop:     @NeuralNexus stop
-Follow:   @NeuralNexus follow me
-Gather:   @NeuralNexus collect 8 oak_log
-Place:    @NeuralNexus place cobblestone at x y z
-Craft:    @NeuralNexus craft stick          (2×2 only)
-Smelt:    @NeuralNexus smelt iron           (furnace + fuel nearby)
-Find:     /tp NeuralNexus                   (op, after Fabric start)
-Env:      docker compose up -d --force-recreate --no-deps companion
-```
+These go through Neural Nexus. The log should show `Avatar act: ...` and then `Running ...`. For every row except the last, check that **no `look_now requested` line** appears.
+
+| ✓ | Say or type | Expect the avatar to send |
+|---|---|---|
+| ☐ | `@NeuralNexus collect some birch logs and make planks` | `collectBlocks(birch_log, …)` then `craftRecipe(birch_planks, …)` |
+| ☐ | `@NeuralNexus put a block of dirt next to you` | `placeBlock(dirt)` or `placeHere(dirt)` |
+| ☐ | `@NeuralNexus go back to base` (after `!rememberHere(base)`) | `goToRememberedPlace(base)` |
+| ☐ | `@NeuralNexus kill that zombie` | `attack(zombie)`. The account must **not** be banned (Minecraft turns are moderated as gameplay). |
+| ☐ | `@NeuralNexus wait here for a minute` | `stay(60)` or `stop` |
+| ☐ | `@NeuralNexus build a small house` | `goal(...)` or a series of place commands |
+| ☐ | `@NeuralNexus what do you see?` | **This one should** show `look_now requested screen`, and the reply describes the Minecraft view without mentioning a webcam. |
+
+## 17. Hold and autonomy regression
+
+| ✓ | Steps | Expect |
+|---|---|---|
+| ☐ | Say `wait here`, then walk 10 to 20 blocks away and wait 60 s | No `Ambient autonomy: walk toward` line. The buddy stays. |
+| ☐ | Then say `follow me` | The hold ends and the buddy follows. |
+| ☐ | Start `!collectBlocks(log, 16)`, then walk 10 blocks away | Autonomy does not pull the buddy off the job. |
+| ☐ | `!stop` while it is digging | The job ends and no `Couldn't finish` message appears. |

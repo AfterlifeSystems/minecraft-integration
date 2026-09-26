@@ -42,3 +42,40 @@ test("abort stops later skills", async () => {
   assert.equal(results[0].status, "aborted");
   assert.equal(bot.calls.length, 0);
 });
+
+test("collectBlocks resolves a block family to every related block", async () => {
+  const { blockIdSearchOrder } = await import(
+    "../companion/src/skills/skillLibrary.js"
+  );
+  const registry = {
+    blocksByName: {
+      oak_log: { id: 1 },
+      dark_oak_log: { id: 2 },
+      stripped_oak_log: { id: 3 },
+      iron_ore: { id: 4 },
+      deepslate_iron_ore: { id: 5 },
+      dirt: { id: 6 },
+    },
+  };
+  assert.deepEqual(blockIdSearchOrder(registry, "log"), [[1, 2]]);
+  assert.deepEqual(blockIdSearchOrder(registry, "oak_log"), [[1], [1, 2]]);
+  assert.deepEqual(blockIdSearchOrder(registry, "iron_ore"), [[4], [4, 5]]);
+  assert.deepEqual(blockIdSearchOrder(registry, "dirt"), [[6]]);
+  assert.deepEqual(blockIdSearchOrder(registry, "netherite"), []);
+});
+
+test("a stop during a dig ends collectBlocks quietly", async () => {
+  const { skillRunners } = await import("../companion/src/skills/skillLibrary.js");
+  const bot = {
+    registry: { blocksByName: { dirt: { id: 6 } } },
+    findBlock: () => ({ position: { x: 0, y: 0, z: 0 } }),
+    pathfinder: { goto: async () => {}, setGoal: () => {} },
+    clearControlStates: () => {},
+    stopDigging: () => {},
+    dig: async () => {
+      await skillRunners.stop(bot);
+      throw new Error("Digging aborted");
+    },
+  };
+  await skillRunners.collectBlocks(bot, "dirt", 4);
+});

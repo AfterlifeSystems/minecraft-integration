@@ -26,3 +26,19 @@ test("first-person capture writes a JPEG of the blocks in front of the bot", () 
 test("first-person capture returns null before spawn", () => {
   assert.equal(renderFirstPersonJpeg({}), null);
 });
+
+test("the drawn view and the snapshot show rain and night", async () => {
+  const { viewConditions } = await import("../companion/src/bot/captureFirstPersonScreenshot.js");
+  const { weatherText, timeOfDayText } = await import("../companion/src/world/worldSnapshot.js");
+  const clearNoon = viewConditions({ isRaining: false, time: { timeOfDay: 6000 } });
+  const rainyNoon = viewConditions({ isRaining: true, thunderState: 0, time: { timeOfDay: 6000 } });
+  const night = viewConditions({ isRaining: false, time: { timeOfDay: 18000 } });
+  assert.deepEqual(clearNoon.sky, [135, 206, 235]);
+  assert.notDeepEqual(rainyNoon.sky, clearNoon.sky);
+  assert.equal(rainyNoon.raining, true);
+  assert.ok(night.brightness < 0.5);
+  assert.equal(weatherText({ isRaining: true, thunderState: 0 }), "raining (snowing in cold biomes)");
+  assert.equal(weatherText({ isRaining: true, thunderState: 1 }), "thunderstorm");
+  assert.equal(weatherText({ isRaining: false }), "clear");
+  assert.equal(timeOfDayText({ time: { timeOfDay: 18000 } }), "night");
+});

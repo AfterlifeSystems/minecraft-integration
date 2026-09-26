@@ -62,6 +62,30 @@ function nearbyBlockLines(bot) {
   }
 }
 
+// Weather as the player sees it. bot.isRaining is true for rain and snow;
+// thunderState above zero means a thunderstorm.
+export function weatherText(bot) {
+  if (!bot?.isRaining) {
+    return "clear";
+  }
+  return (bot.thunderState || 0) > 0 ? "thunderstorm" : "raining (snowing in cold biomes)";
+}
+
+// Minecraft's day is 24000 ticks: 0 is sunrise, 6000 noon, 12000 sunset,
+// 18000 midnight.
+export function timeOfDayText(bot) {
+  const ticks = bot?.time?.timeOfDay;
+  if (typeof ticks !== "number") {
+    return "unknown";
+  }
+  if (ticks < 1000) return "sunrise";
+  if (ticks < 6000) return "morning";
+  if (ticks < 11500) return "afternoon";
+  if (ticks < 13000) return "sunset";
+  if (ticks < 23000) return "night";
+  return "dawn";
+}
+
 export function buildWorldSnapshotText(bot) {
   if (!bot?.entity) {
     return "The avatar has not spawned yet.";
@@ -74,7 +98,8 @@ export function buildWorldSnapshotText(bot) {
     `yaw: ${bot.entity.yaw?.toFixed?.(2) ?? bot.entity.yaw} pitch: ${bot.entity.pitch?.toFixed?.(2) ?? bot.entity.pitch}`,
     `dimension: ${bot.game?.dimension || "unknown"}`,
     `biome: ${biome}`,
-    `time: ${bot.time?.timeOfDay ?? "unknown"}`,
+    `time: ${timeOfDayText(bot)} (tick ${bot.time?.timeOfDay ?? "unknown"})`,
+    `weather: ${weatherText(bot)}`,
     `health: ${bot.health} food: ${bot.food}`,
     `held: ${held}`,
     `inventory: ${inventoryLines(bot)}`,

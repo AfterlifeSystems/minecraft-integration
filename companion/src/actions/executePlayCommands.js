@@ -15,8 +15,8 @@ export async function executePlayCommands(
       if (onCommand) {
         onCommand(command);
       }
-      await runSkill(bot, command);
-      results.push({ command, status: "ok" });
+      const output = await runSkill(bot, command);
+      results.push({ command, status: "ok", output: output == null ? "" : String(output) });
     } catch (error) {
       results.push({
         command,

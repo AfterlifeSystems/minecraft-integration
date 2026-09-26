@@ -28,7 +28,7 @@ test("spoken turn uses diarize and voice_mode from the serving API", () => {
   assert.equal(fields.thread_id, "thread-1");
   assert.equal(fields.user_timezone, "America/New_York");
   assert.equal(fields.ambient, undefined);
-  assert.equal(fields.live_shares, '["webcam","screen"]');
+  assert.equal(fields.live_shares, '["screen"]');
   assert.equal(fields.minecraft_body, "true");
   assert.equal(fields.minecraft_world, "position: 26.5, 73.0, -120.5");
   assert.doesNotMatch(fields.message, /LATENT_MINECRAFT_BODY/);
@@ -89,7 +89,7 @@ test("typed chat is a streamed voice-mode message without diarize", () => {
   assert.equal(fields.stream, "true");
   assert.equal(fields.voice_mode, "true");
   assert.equal(fields.diarize, undefined);
-  assert.equal(fields.live_shares, '["webcam","screen"]');
+  assert.equal(fields.live_shares, '["screen"]');
   assert.equal(fields.message, "follow me");
   assert.equal(fields.minecraft_body, "true");
   assert.equal(fields.minecraft_world, "health: 20 food: 20");
@@ -107,14 +107,14 @@ test("idle play turn is a plain streamed voice-mode message", () => {
   assert.equal(fields.voice_mode, "true");
   assert.equal(fields.diarize, undefined);
   assert.equal(fields.ambient, undefined);
-  assert.equal(fields.live_shares, '["webcam","screen"]');
+  assert.equal(fields.live_shares, '["screen"]');
   assert.equal(fields.minecraft_body, "true");
   assert.equal(fields.minecraft_world, "nearby players: UncleEvan1337");
 });
 
 test("look_now resume sends the first-person JPEG as the requested shares", () => {
-  assert.deepEqual(requestedLookSources(["webcam"]), ["webcam"]);
-  assert.deepEqual(requestedLookSources([]), ["webcam", "screen"]);
+  assert.deepEqual(requestedLookSources(["webcam"]), ["screen"]);
+  assert.deepEqual(requestedLookSources([]), ["screen"]);
   const formData = buildLookNowResumeFormData({
     threadId: "thread-1",
     screenshotBytes: Buffer.from("jpeg"),
@@ -124,8 +124,8 @@ test("look_now resume sends the first-person JPEG as the requested shares", () =
   const fields = formDataTextFields(formData);
   assert.equal(fields.decision, "looked");
   assert.equal(fields.thread_id, "thread-1");
-  assert.equal(fields.live_shares, '["webcam","screen"]');
-  assert.equal(fields.sources, '["webcam"]');
+  assert.equal(fields.live_shares, '["screen"]');
+  assert.equal(fields.sources, '["screen"]');
   assert.equal(fields.minecraft_body, "true");
   assert.equal(fields.minecraft_world, "held: dark_oak_log");
 });

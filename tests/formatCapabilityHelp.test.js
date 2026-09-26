@@ -19,10 +19,12 @@ test("help lines are natural language and cover the COMMANDS.md catalog", () => 
   assert.match(joined, /Neural Nexus/);
   assert.match(joined, /follow me/);
   assert.match(joined, /c'mon NeuralNexus/);
-  assert.match(joined, /stay there/);
-  assert.match(joined, /gather or mine/);
+  assert.match(joined, /wait here/);
+  assert.match(joined, /gather wood/);
+  assert.match(joined, /never after you tell me to stop/);
   assert.match(joined, /2 by 2/);
   assert.match(joined, /furnace/);
+  assert.match(joined, /hand over what I collected/);
   assert.match(joined, /one hit/);
   assert.match(joined, /eat/);
   assert.match(joined, /sleep/);

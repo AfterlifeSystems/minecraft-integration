@@ -11,10 +11,12 @@ function asBlob(value, mimeType) {
   return new Blob([value], { type: mimeType });
 }
 
-// The first-person Minecraft view is always available. Anubis only attaches
-// look_now when a turn reports live_shares; "what do you see" is the webcam,
-// and ambient looks already ride as screen.jpg.
-export const LIVE_MINECRAFT_SHARES = '["webcam","screen"]';
+// The first-person Minecraft view rides the screen source and nothing else.
+// Reporting a "webcam" told the avatar a camera pointed at the player was
+// live, so "look at me" became a look through a camera that does not exist
+// ("I don't see you in the webcam view"). Anubis offers look_now to a
+// Minecraft body only for sight questions, and only for the screen source.
+export const LIVE_MINECRAFT_SHARES = '["screen"]';
 
 function appendLiveMinecraftShares(formData) {
   formData.append("live_shares", LIVE_MINECRAFT_SHARES);
@@ -35,14 +37,10 @@ export function lookSourceForFileName(fileName) {
   return fileName === "webcam.jpg" ? "webcam" : "screen";
 }
 
-export function requestedLookSources(interruptSources) {
-  const names = (Array.isArray(interruptSources) ? interruptSources : [])
-    .map((source) => String(source || "").trim().toLowerCase())
-    .filter((source) => source === "webcam" || source === "screen");
-  if (names.length) {
-    return [...new Set(names)];
-  }
-  return ["webcam", "screen"];
+// The body has one view, the first-person screen. A request naming the webcam
+// is still answered with that one view, labelled as the screen source.
+export function requestedLookSources(_interruptSources) {
+  return ["screen"];
 }
 
 export function buildSpokenTurnFormData({

@@ -18,6 +18,44 @@ function inventoryLines(bot) {
     .join(", ");
 }
 
+// Equipment slots of the entity_equipment packet: 0 main hand, 1 off hand,
+// 2 feet, 3 legs, 4 chest, 5 head.
+const WORN_EQUIPMENT_SLOTS = [
+  [5, "head"],
+  [4, "chest"],
+  [3, "legs"],
+  [2, "feet"],
+];
+
+// What a player character looks like, from the player's own data. The drawn
+// first-person view (captureFirstPersonScreenshot) colours blocks only and
+// never draws a player, so "what do I look like?" in the game is answerable
+// only from this line: held items, worn armour, and the skin model.
+export function playerAppearanceText(bot, entity) {
+  const equipment = entity?.equipment || [];
+  const parts = [];
+  const mainHandItem = equipment[0]?.name;
+  const offHandItem = equipment[1]?.name;
+  parts.push(`holding ${mainHandItem || "nothing"}`);
+  if (offHandItem) {
+    parts.push(`off hand ${offHandItem}`);
+  }
+  const wornItems = WORN_EQUIPMENT_SLOTS.map(([slot, bodyPart]) =>
+    equipment[slot]?.name ? `${bodyPart} ${equipment[slot].name}` : null
+  ).filter(Boolean);
+  parts.push(wornItems.length ? `wearing ${wornItems.join(", ")}` : "wearing no armor");
+  const skinData = bot.players?.[entity?.username]?.skinData;
+  if (skinData?.url) {
+    parts.push(`custom skin, ${skinData.model === "slim" ? "slim" : "classic"} arms`);
+    if (skinData.capeUrl) {
+      parts.push("cape");
+    }
+  } else {
+    parts.push("skin unknown (default Steve or Alex skin, or not reported)");
+  }
+  return parts.join("; ");
+}
+
 function nearbyPlayerLines(bot) {
   const selfId = bot.entity?.id;
   const players = Object.values(bot.entities || {}).filter(
@@ -32,7 +70,7 @@ function nearbyPlayerLines(bot) {
       const distance = bot.entity
         ? bot.entity.position.distanceTo(entity.position).toFixed(1)
         : "?";
-      return `${entity.username || "player"} distance=${distance} at ${entity.position.x.toFixed(1)},${entity.position.y.toFixed(1)},${entity.position.z.toFixed(1)}`;
+      return `${entity.username || "player"} distance=${distance} at ${entity.position.x.toFixed(1)},${entity.position.y.toFixed(1)},${entity.position.z.toFixed(1)} appearance: ${playerAppearanceText(bot, entity)}`;
     })
     .join("; ");
 }

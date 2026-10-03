@@ -223,6 +223,7 @@ Full steps: [docs/PUBLIC-ACCESS.md](docs/PUBLIC-ACCESS.md) and the public-server
 | [docs/KID.md](docs/KID.md) | Player join, chat, and voice |
 | [docs/COMMANDS.md](docs/COMMANDS.md) | Every player phrase, latent skill, and host command |
 | [docs/PUBLIC-ACCESS.md](docs/PUBLIC-ACCESS.md) | LAN, home port forward, ngrok (TCP only), EC2, playit.gg, why Cloudflare HTTP is the wrong tunnel |
+| [docs/DEPLOYMENT-COSTS.md](docs/DEPLOYMENT-COSTS.md) | EC2 instance sizing from measured usage, monthly cost, public IP cost, direct connect without playit.gg |
 | [mods/README.md](mods/README.md) | Which jars to copy onto each client |
 
 API contract: `api-1.json`. Request shapes match the Neural Nexus web client (`diarize`, `ambient`, `voice_mode`, `camera_facing=world`).

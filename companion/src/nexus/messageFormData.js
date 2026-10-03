@@ -4,6 +4,8 @@
  * and Neural-Nexus-Frontend avatarService.jsx.
  */
 
+import { MINECRAFT_VIEW_FILE_NAME } from "../bot/lookIntent.js";
+
 function asBlob(value, mimeType) {
   if (value instanceof Blob) {
     return value;
@@ -25,6 +27,13 @@ function appendLiveMinecraftShares(formData) {
 function appendMinecraftBody(formData, minecraftWorldSnapshot) {
   formData.append("minecraft_body", "true");
   formData.append("minecraft_world", minecraftWorldSnapshot ?? "");
+  // The authenticity metrics (stylometry and the SHAP explanation) are shown
+  // only in the web app, and the API computes the metrics before the done
+  // frame the companion waits on to speak: 1,017 ms of every turn, measured
+  // 2026-10-02 (LangSmith project anubis-local-testing, think span after the
+  // reply model). The game never shows the metrics, so the game skips the
+  // metrics.
+  formData.append("include_quality_metrics", "false");
 }
 
 export function lookNowFileName(sourceName) {
@@ -116,6 +125,31 @@ export function buildAmbientLookFormData({
 }
 
 export function buildTypedChatFormData({
+  playPromptMessage = "",
+  threadId,
+  userTimezone,
+  minecraftWorldSnapshot = "",
+  viewPictureBytes = null,
+} = {}) {
+  const formData = buildTypedChatFormDataWithoutPicture({
+    playPromptMessage,
+    threadId,
+    userTimezone,
+    minecraftWorldSnapshot,
+  });
+  // The body's first-person view, taken before the request, so a sight
+  // question is answered in one model call instead of a look_now pause.
+  if (viewPictureBytes) {
+    formData.append(
+      "files",
+      asBlob(viewPictureBytes, "image/jpeg"),
+      MINECRAFT_VIEW_FILE_NAME
+    );
+  }
+  return formData;
+}
+
+function buildTypedChatFormDataWithoutPicture({
   playPromptMessage = "",
   threadId,
   userTimezone,

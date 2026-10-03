@@ -1,5 +1,6 @@
 import { Vec3 } from "vec3";
 import { encode as encodeJpeg } from "jpeg-js";
+import { skinColorsForUrl, UNKNOWN_SKIN_COLORS } from "./playerSkinColors.js";
 
 const IMAGE_WIDTH = 160;
 const IMAGE_HEIGHT = 90;
@@ -76,19 +77,141 @@ export function viewConditions(bot) {
   return { sky, brightness, raining };
 }
 
-function lookDirection(yaw, pitch, offsetX, offsetY) {
-  const lookYaw = yaw + offsetX;
-  const lookPitch = pitch + offsetY;
+// Mineflayer's own view direction (ray_trace.js getViewDirection):
+// (-sin(yaw) cos(pitch), sin(pitch), -cos(yaw) cos(pitch)). A larger yaw turns
+// the body to the body's left and a larger pitch looks up, so a pixel right of
+// centre subtracts from the yaw and a pixel below centre subtracts from the
+// pitch. Adding both offsets drew the view mirrored left to right and drew a
+// body looking up as looking down (2026-10-02: "a brown tree on the left"
+// for a dirt column the player saw on the right).
+function lookDirection(yaw, pitch, offsetRight, offsetDown) {
+  const lookYaw = yaw - offsetRight;
+  const lookPitch = pitch - offsetDown;
   return new Vec3(
     -Math.sin(lookYaw) * Math.cos(lookPitch),
-    -Math.sin(lookPitch),
+    Math.sin(lookPitch),
     -Math.cos(lookYaw) * Math.cos(lookPitch)
   );
+}
+
+// Player characters are drawn so a look can show what a player looks like
+// ("what do I look like?" is answered by turning to the player, then looking).
+// Parts of the 1.8-block player model in the player's own frame: x across the
+// body (the player's right is +x), y up from the feet, z front to back.
+const PLAYER_PARTS = [
+  { part: "legs", armorSlot: 2, box: [-0.25, 0, -0.125, 0.25, 0.3, 0.125] },
+  { part: "legs", armorSlot: 3, box: [-0.25, 0.3, -0.125, 0.25, 0.75, 0.125] },
+  { part: "torso", armorSlot: 4, box: [-0.25, 0.75, -0.125, 0.25, 1.5, 0.125] },
+  { part: "arms", armorSlot: 4, box: [-0.5, 0.75, -0.125, -0.25, 1.5, 0.125] },
+  { part: "arms", armorSlot: 4, box: [0.25, 0.75, -0.125, 0.5, 1.5, 0.125] },
+  { part: "head", armorSlot: 5, box: [-0.25, 1.5, -0.25, 0.25, 2.0, 0.25] },
+];
+const PLAYER_DRAW_DISTANCE = 32;
+
+const ARMOR_MATERIAL_COLORS = {
+  leather: [160, 101, 64],
+  chainmail: [150, 150, 150],
+  iron: [216, 216, 216],
+  golden: [250, 215, 60],
+  diamond: [90, 220, 210],
+  netherite: [70, 60, 65],
+  turtle: [70, 160, 60],
+};
+
+function armorColor(itemName) {
+  if (!itemName) return null;
+  const material = Object.keys(ARMOR_MATERIAL_COLORS).find((name) =>
+    itemName.startsWith(`${name}_`)
+  );
+  return material ? ARMOR_MATERIAL_COLORS[material] : [120, 120, 120];
+}
+
+// Distance along the ray to an axis-aligned box, or Infinity when the ray
+// misses the box (the slab method).
+function rayBoxDistance(origin, direction, box) {
+  let nearest = 0;
+  let farthest = Infinity;
+  const axes = [
+    [origin.x, direction.x, box[0], box[3]],
+    [origin.y, direction.y, box[1], box[4]],
+    [origin.z, direction.z, box[2], box[5]],
+  ];
+  for (const [start, step, low, high] of axes) {
+    if (Math.abs(step) < 1e-9) {
+      if (start < low || start > high) return Infinity;
+      continue;
+    }
+    let entry = (low - start) / step;
+    let exit = (high - start) / step;
+    if (entry > exit) [entry, exit] = [exit, entry];
+    nearest = Math.max(nearest, entry);
+    farthest = Math.min(farthest, exit);
+    if (nearest > farthest) return Infinity;
+  }
+  return nearest;
+}
+
+// The nearest player part a ray hits: { distance, color } or null. The ray is
+// turned into each player's own frame, so the arms sit at the player's sides
+// whichever way the player faces.
+function nearestPlayerHit(eye, direction, playerFigures) {
+  let nearestHit = null;
+  for (const figure of playerFigures) {
+    const relative = eye.minus(figure.position);
+    const cosine = Math.cos(figure.yaw);
+    const sine = Math.sin(figure.yaw);
+    // Facing direction of yaw is (-sin, 0, -cos); the player's right is
+    // (cos, 0, -sin). Local x = right, local z = backward.
+    const toLocal = (vector) =>
+      new Vec3(
+        vector.x * cosine - vector.z * sine,
+        vector.y,
+        vector.x * sine + vector.z * cosine
+      );
+    const localOrigin = toLocal(relative);
+    const localDirection = toLocal(direction);
+    for (const piece of PLAYER_PARTS) {
+      const distance = rayBoxDistance(localOrigin, localDirection, piece.box);
+      if (distance < (nearestHit?.distance ?? Infinity)) {
+        const worn = armorColor(figure.equipment[piece.armorSlot]?.name);
+        nearestHit = { distance, color: worn || figure.colors[piece.part] };
+      }
+    }
+  }
+  return nearestHit;
+}
+
+function blockHitDistance(eye, hit) {
+  if (!hit) return Infinity;
+  if (hit.intersect) return eye.distanceTo(hit.intersect);
+  if (hit.position) return eye.distanceTo(hit.position.offset(0.5, 0.5, 0.5));
+  return Infinity;
+}
+
+// The other players near the body, with the colours to draw them in.
+export function playerFiguresNear(bot, colorsByUsername = {}) {
+  const selfId = bot?.entity?.id;
+  const eye = bot?.entity?.position;
+  return Object.values(bot?.entities || {})
+    .filter(
+      (entity) =>
+        entity?.type === "player" &&
+        entity.id !== selfId &&
+        entity.position &&
+        (!eye || eye.distanceTo(entity.position) <= PLAYER_DRAW_DISTANCE)
+    )
+    .map((entity) => ({
+      position: entity.position,
+      yaw: entity.yaw || 0,
+      equipment: entity.equipment || [],
+      colors: colorsByUsername[entity.username] || UNKNOWN_SKIN_COLORS,
+    }));
 }
 
 export function renderFirstPersonJpeg(bot, {
   width = IMAGE_WIDTH,
   height = IMAGE_HEIGHT,
+  playerFigures = playerFiguresNear(bot),
 } = {}) {
   if (!bot?.entity || typeof bot.world?.raycast !== "function") {
     return null;
@@ -103,18 +226,28 @@ export function renderFirstPersonJpeg(bot, {
 
   for (let row = 0; row < height; row += 1) {
     for (let column = 0; column < width; column += 1) {
-      const offsetX = ((column / (width - 1) - 0.5) * fov * aspect);
-      const offsetY = ((row / (height - 1) - 0.5) * fov);
-      const direction = lookDirection(yaw, pitch, offsetX, offsetY).normalize();
+      const offsetRight = ((column / (width - 1) - 0.5) * fov * aspect);
+      const offsetDown = ((row / (height - 1) - 0.5) * fov);
+      const direction = lookDirection(yaw, pitch, offsetRight, offsetDown).normalize();
       let blockName = "air";
+      let blockDistance = Infinity;
       try {
         const hit = bot.world.raycast(eye, direction, RAY_DISTANCE);
         blockName = hit?.name || "air";
+        blockDistance = blockHitDistance(eye, hit);
       } catch {
         blockName = "air";
       }
-      const isSky = blockName === "air";
-      let [red, green, blue] = isSky ? sky : colorForBlockName(blockName);
+      const playerHit = playerFigures.length
+        ? nearestPlayerHit(eye, direction, playerFigures)
+        : null;
+      const playerIsNearer = playerHit && playerHit.distance < blockDistance;
+      const isSky = blockName === "air" && !playerIsNearer;
+      let [red, green, blue] = playerIsNearer
+        ? playerHit.color
+        : isSky
+          ? sky
+          : colorForBlockName(blockName);
       if (!isSky) {
         red *= brightness;
         green *= brightness;
@@ -141,5 +274,15 @@ export async function captureFirstPersonScreenshot(bot) {
   if (typeof bot?.captureScreenshot === "function") {
     return bot.captureScreenshot();
   }
-  return renderFirstPersonJpeg(bot);
+  // Each nearby player's skin colours, fetched once per skin address, so the
+  // drawn player wears the player's own colours.
+  const colorsByUsername = {};
+  for (const entity of Object.values(bot?.entities || {})) {
+    if (entity?.type !== "player" || !entity.username) continue;
+    const skinUrl = bot.players?.[entity.username]?.skinData?.url;
+    colorsByUsername[entity.username] = await skinColorsForUrl(skinUrl);
+  }
+  return renderFirstPersonJpeg(bot, {
+    playerFigures: playerFiguresNear(bot, colorsByUsername),
+  });
 }

@@ -55,6 +55,7 @@ import {
   enqueueUserTurn,
 } from "./bot/userTurnQueue.js";
 import { extractLocalBodyIntent } from "./bot/extractLocalBodyIntent.js";
+import { isAppearanceQuestion, lookIntentOf } from "./bot/lookIntent.js";
 import {
   autonomyMayMoveBody,
   commandsNotAlreadyRun,
@@ -348,15 +349,76 @@ function rememberThread(turn) {
   }
 }
 
-async function answerLookNowPauses(turn, signal) {
+// Milliseconds per stage of one player turn, logged in one line, so the
+// latency of each stage can be read off the companion log.
+function startTurnTiming(kind) {
+  const startedAt = performance.now();
+  let previousAt = startedAt;
+  const stages = [];
+  return {
+    mark(stageName) {
+      const now = performance.now();
+      stages.push(`${stageName} +${Math.round(now - previousAt)} ms`);
+      previousAt = now;
+    },
+    report() {
+      console.log(
+        `Turn timing (${kind}): ${stages.join(", ")}; total ${Math.round(performance.now() - startedAt)} ms`
+      );
+    },
+  };
+}
+
+// Turn the body to the nearest other player at once (lookAt sets the yaw and
+// pitch immediately), so the next picture shows the player character.
+async function turnBodyToPlayer() {
+  try {
+    await executePlayCommands(bot, [{ name: "lookAt", arguments: ["player"] }], {
+      onCommand: (command) => console.log("Running", command.name, command.arguments),
+    });
+  } catch (error) {
+    console.warn("Turning to the player failed:", error.message);
+  }
+}
+
+// The body's view for a sight question, taken before the request; null when
+// the message needs no picture.
+async function takeViewPictureFor(playerText) {
+  const lookIntent = lookIntentOf(playerText);
+  if (lookIntent === "none") {
+    return null;
+  }
+  if (lookIntent === "look_at_player") {
+    await turnBodyToPlayer();
+  }
+  const viewPictureBytes = await captureFirstPersonScreenshot(bot);
+  console.log(
+    `View picture for a ${lookIntent} question:`,
+    viewPictureBytes ? `${viewPictureBytes.length} bytes` : "none"
+  );
+  return viewPictureBytes;
+}
+
+async function answerLookNowPauses(turn, signal, playerText = "") {
   let currentTurn = turn;
   rememberThread(currentTurn);
   const heardSpeech = currentTurn.spokenTurnText;
   let lookDepth = 0;
+  const lookDirectionCommandsRun = { count: 0 };
   while (isLookNowInterrupt(currentTurn) && lookDepth < MAXIMUM_LOOKS_PER_TURN) {
     const requestedSources = currentTurn.interrupt?.sources || [];
     console.log("look_now requested", requestedSources.join(",") || "screen");
     const earlierMinecraftAct = currentTurn.minecraftAct;
+    // "What do I look like?" is answered by turning to the player, then
+    // looking. Body commands normally run after the whole reply, which would
+    // take the picture before the turn, so the look-direction commands sent
+    // before this pause run now, ahead of the picture.
+    await turnBodyBeforeLook(earlierMinecraftAct, lookDirectionCommandsRun);
+    // A question about how the person looks turns the body to the person even
+    // when the avatar sent no lookAt before the pause.
+    if (lookDepth === 0 && isAppearanceQuestion(playerText || currentTurn.spokenTurnText)) {
+      await turnBodyToPlayer();
+    }
     const screenshotBytes = await captureFirstPersonScreenshot(bot);
     if (screenshotBytes) {
       console.log("look_now sending first-person JPEG", screenshotBytes.length);
@@ -383,6 +445,31 @@ async function answerLookNowPauses(turn, signal) {
     currentTurn.spokenTurnText = heardSpeech;
   }
   return currentTurn;
+}
+
+const LOOK_DIRECTION_COMMAND_NAMES = new Set(["lookAt", "lookAtPlayer", "lookAtPosition"]);
+
+// Run, ahead of a look's picture, the look-direction commands of the reply
+// that have not run yet. lookAt sets the body's yaw and pitch at once, so the
+// picture drawn right after shows what the body turned to. The commands stay
+// in the reply and run again after the reply, which leaves the view unchanged.
+async function turnBodyBeforeLook(minecraftAct, lookDirectionCommandsRun) {
+  const lookDirectionCommands = commandsFromMinecraftAct(minecraftAct).filter(
+    (command) => LOOK_DIRECTION_COMMAND_NAMES.has(resolveCommandName(command?.name) || command?.name)
+  );
+  const commandsNotYetRun = lookDirectionCommands.slice(lookDirectionCommandsRun.count);
+  lookDirectionCommandsRun.count = lookDirectionCommands.length;
+  if (!commandsNotYetRun.length) {
+    return;
+  }
+  console.log("look_now turning first:", describeCommands(commandsNotYetRun));
+  try {
+    await executePlayCommands(bot, commandsNotYetRun, {
+      onCommand: (command) => console.log("Running", command.name, command.arguments),
+    });
+  } catch (error) {
+    console.warn("Turning before the look failed:", error.message);
+  }
 }
 
 // Run body commands from either source and keep the body's goal state honest:
@@ -589,17 +676,25 @@ async function handlePlayerChat(username, message) {
   }
   const alreadyRunCommands = localCommands;
   acceptUserTurn("typed", async (signal) => {
+    const turnTiming = startTurnTiming("typed");
     await preemptAmbientLook();
+    // A sight question carries the body's view on the first request: one
+    // model call, no look_now pause. A question about how the person looks
+    // turns the body to the person before the picture.
+    const viewPictureBytes = await takeViewPictureFor(mentionedText);
+    turnTiming.mark(viewPictureBytes ? "picture taken" : "no picture needed");
     console.log("Sending typed turn to Neural Nexus");
-    const turn = await answerLookNowPauses(
-      await postTypedChatTurnOrRetry(mentionedText, signal),
-      signal
-    );
+    const firstLeg = await postTypedChatTurnOrRetry(mentionedText, signal, viewPictureBytes);
+    turnTiming.mark("first reply leg done");
+    const turn = await answerLookNowPauses(firstLeg, signal, mentionedText);
+    turnTiming.mark("reply done");
     console.log(
       "Neural Nexus typed reply:",
       String(turn.content || "").replace(/\s+/g, " ").trim().slice(0, 160)
     );
     await handleReply(turn, { alreadyRunCommands });
+    turnTiming.mark("reply spoken");
+    turnTiming.report();
   });
 }
 
@@ -640,13 +735,14 @@ async function postMessageTurnOrRetry(kind, startTurn, signal) {
   }
 }
 
-async function postTypedChatTurnOrRetry(mentionedText, signal) {
+async function postTypedChatTurnOrRetry(mentionedText, signal, viewPictureBytes = null) {
   refreshMinecraftWorldSnapshot();
   return postMessageTurnOrRetry(
     "typed chat",
     () =>
       postTypedChatTurn(configuration, {
         playPromptMessage: conversationMessage(mentionedText),
+        viewPictureBytes,
         signal,
         onFrame: rememberStreamingFrame,
       }),
@@ -675,11 +771,15 @@ async function handleSpokenUtterance(utteranceBytes, senderName) {
   }
   console.log("Spoken utterance queued from", senderName || "unknown");
   acceptUserTurn("spoken", async (signal) => {
+    const turnTiming = startTurnTiming("spoken");
     await preemptAmbientLook();
-    const turn = await answerLookNowPauses(
-      await postSpokenTurnOrRetry(utteranceBytes, signal),
-      signal
-    );
+    const firstLeg = await postSpokenTurnOrRetry(utteranceBytes, signal);
+    turnTiming.mark("first reply leg done");
+    // The words of a spoken turn are known only after the server transcribes
+    // them, so the picture cannot ride the first request; the heard words
+    // still turn the body to the person before a look's picture.
+    const turn = await answerLookNowPauses(firstLeg, signal, firstLeg.spokenTurnText);
+    turnTiming.mark("reply done");
     console.log(
       "Neural Nexus spoken reply:",
       stripLeakedSystemPrompt(turn.content || "").slice(0, 160)
@@ -696,6 +796,8 @@ async function handleSpokenUtterance(utteranceBytes, senderName) {
       alreadyRunCommands = await runLocalBodyIntent(turn.spokenTurnText);
     }
     await handleReply(turn, { alreadyRunCommands });
+    turnTiming.mark("reply spoken");
+    turnTiming.report();
   });
 }
 

@@ -65,12 +65,21 @@ export async function streamMessageTurn({
     throw new Error(`${path} returned no event stream.`);
   }
 
-  const reader = response.body.getReader();
+  return readMessageTurnUntilDone(response.body.getReader(), onFrame);
+}
+
+// Read frames until the reply's done frame, then return the turn at once.
+// After done the API keeps the stream open to name a new conversation for the
+// web app's sidebar (two model calls, 4,981 ms measured 2026-10-02 on the
+// first turn of a thread); the companion has the whole reply by then, so the
+// rest of the stream is drained in the background instead of being waited on.
+export async function readMessageTurnUntilDone(reader, onFrame) {
   const textDecoder = new TextDecoder();
   let pendingText = "";
   const frames = [];
+  let replyIsDone = false;
   try {
-    for (;;) {
+    while (!replyIsDone) {
       const { done, value } = await reader.read();
       if (done) {
         break;
@@ -80,16 +89,47 @@ export async function streamMessageTurn({
       frames.push(...consumed.frames);
       notifyMessageFrames(onFrame, consumed.frames);
       pendingText = consumed.remaining;
+      replyIsDone = consumed.frames.some((frame) => frame?.type === "done");
     }
-    if (pendingText.trim()) {
+    if (!replyIsDone && pendingText.trim()) {
       const consumed = consumeServerSentEventBuffer(`${pendingText}\n\n`);
       frames.push(...consumed.frames);
       notifyMessageFrames(onFrame, consumed.frames);
     }
-  } finally {
+  } catch (error) {
+    reader.releaseLock();
+    throw error;
+  }
+  if (replyIsDone) {
+    drainRemainingFrames(reader, onFrame, textDecoder, pendingText);
+  } else {
     reader.releaseLock();
   }
   return collectMessageTurnFromFrames(frames);
+}
+
+// Keep reading the frames sent after done (the conversation title), so the
+// API finishes the request normally, without holding up the reply.
+function drainRemainingFrames(reader, onFrame, textDecoder, pendingText) {
+  (async () => {
+    let remainingText = pendingText;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        remainingText += textDecoder.decode(value, { stream: true });
+        const consumed = consumeServerSentEventBuffer(remainingText);
+        notifyMessageFrames(onFrame, consumed.frames);
+        remainingText = consumed.remaining;
+      }
+    } catch {
+      // A stream cut off after the reply loses only the conversation title.
+    } finally {
+      reader.releaseLock();
+    }
+  })();
 }
 
 export function isLookNowInterrupt(turn) {
@@ -167,6 +207,7 @@ export async function postAmbientLook(configuration, {
 
 export async function postTypedChatTurn(configuration, {
   playPromptMessage,
+  viewPictureBytes = null,
   signal,
   onFrame,
 } = {}) {
@@ -179,6 +220,7 @@ export async function postTypedChatTurn(configuration, {
       threadId: configuration.threadId,
       userTimezone: configuration.userTimezone,
       minecraftWorldSnapshot: configuration.minecraftWorldSnapshot,
+      viewPictureBytes,
     }),
     signal,
     onFrame,

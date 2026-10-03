@@ -137,3 +137,15 @@ test("stop turn sends request_id", () => {
   assert.equal(fields.request_id, "req-1");
   assert.equal(fields.thread_id, "thread-1");
 });
+
+test("every Minecraft turn skips the web-only quality metrics", async () => {
+  const messageFormDataModule = await import("../companion/src/nexus/messageFormData.js");
+  const resumeFields = messageFormDataModule.formDataTextFields(
+    messageFormDataModule.buildLookNowResumeFormData({ threadId: "thread-1" })
+  );
+  const typedFields = messageFormDataModule.formDataTextFields(
+    messageFormDataModule.buildTypedChatFormData({ playPromptMessage: "hi" })
+  );
+  assert.equal(resumeFields.include_quality_metrics, "false");
+  assert.equal(typedFields.include_quality_metrics, "false");
+});
